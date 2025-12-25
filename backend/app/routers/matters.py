@@ -549,6 +549,7 @@ class BatchProcessRequest(BaseModel):
     matter_type: Optional[str] = None  # If None, process all types
     only_pending: bool = True  # If False, reprocess all including completed
     fast_mode: bool = True  # Use fast text-only tagger (recommended)
+    smart_mode: bool = False  # Use LLM-based tagger (requires GOOGLE_API_KEY)
 
 
 def run_fast_pipeline(document_id: str, filepath: str):
@@ -624,6 +625,83 @@ def run_fast_pipeline(document_id: str, filepath: str):
         db.close()
 
 
+def run_smart_pipeline(document_id: str, filepath: str):
+    """Run LLM-based tagging pipeline (Smart Mode)."""
+    from ..database.db import SessionLocal, Document, Result, Model, ModelUsage
+    from ..services.llm_tagger import process_document_smart
+    import uuid
+
+    db = SessionLocal()
+    try:
+        result_data = process_document_smart(filepath, db)
+
+        # Check for errors
+        if result_data.get('error'):
+            raise Exception(result_data['error'])
+
+        # Get model name
+        model_name = result_data.get('model', 'gemini-2.0-flash')
+        processing_time = result_data.get('processing_time_seconds', 0)
+
+        # Create result record
+        result_id = str(uuid.uuid4())
+        result = Result(
+            id=result_id,
+            document_id=document_id,
+            processing_time_seconds=processing_time,
+            semantic_model=model_name,
+            vision_model=None,
+            vision_enabled=False,
+            tag_count=result_data.get('tag_count', 0),
+            average_confidence=result_data.get('average_confidence', 0),
+            result_json=result_data,
+            visual_pages=None
+        )
+        db.add(result)
+
+        # Get or create model in registry
+        model = db.query(Model).filter(Model.name == model_name).first()
+        if not model:
+            model = Model(
+                id=str(uuid.uuid4()),
+                name=model_name,
+                type='llm',
+                huggingface_url=None,
+                approved=True
+            )
+            db.add(model)
+            db.flush()
+
+        # Create model usage record
+        model_usage = ModelUsage(
+            id=str(uuid.uuid4()),
+            model_id=model.id,
+            result_id=result_id,
+            processing_time_seconds=processing_time
+        )
+        db.add(model_usage)
+
+        # Update document
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if document:
+            document.status = "completed"
+            document.word_count = result_data.get('word_count')
+            document.page_count = 1
+
+        db.commit()
+
+    except Exception as e:
+        # Mark as failed
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if document:
+            document.status = "failed"
+            document.error_message = str(e)
+            db.commit()
+
+    finally:
+        db.close()
+
+
 @router.post("/process-batch")
 async def process_batch(
     request: BatchProcessRequest,
@@ -662,7 +740,12 @@ async def process_batch(
     db.commit()
 
     # Choose pipeline based on mode
-    if request.fast_mode:
+    if request.smart_mode:
+        # LLM-based pipeline (requires GOOGLE_API_KEY)
+        for doc_id, filepath in doc_info:
+            background_tasks.add_task(run_smart_pipeline, doc_id, filepath)
+        mode_msg = "smart LLM-based (Gemini)"
+    elif request.fast_mode:
         # Fast text-only pipeline
         for doc_id, filepath in doc_info:
             background_tasks.add_task(run_fast_pipeline, doc_id, filepath)

@@ -774,7 +774,7 @@ function MatterTypeCard({
 export default function Matters() {
   const [showImportModal, setShowImportModal] = useState(false)
   const [processAllTarget, setProcessAllTarget] = useState<{ type: string | null, count: number } | null>(null)
-  const [fastMode, setFastMode] = useState(true)  // Fast mode enabled by default
+  const [processingMode, setProcessingMode] = useState<'fast' | 'smart'>('fast')
   const [showStatusPanel, setShowStatusPanel] = useState(true)  // Processing status panel
   const queryClient = useQueryClient()
 
@@ -793,7 +793,8 @@ export default function Matters() {
       api.post('/api/matters/process-batch', {
         matter_type: matterType,
         only_pending: true,
-        fast_mode: fastMode
+        fast_mode: processingMode === 'fast',
+        smart_mode: processingMode === 'smart'
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['matter-stats'] })
@@ -806,7 +807,8 @@ export default function Matters() {
       api.post('/api/matters/process-batch', {
         matter_type: matterType,
         only_pending: false,
-        fast_mode: fastMode
+        fast_mode: processingMode === 'fast',
+        smart_mode: processingMode === 'smart'
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['matter-stats'] })
@@ -839,17 +841,34 @@ export default function Matters() {
           </p>
         </div>
         <div className="flex items-center gap-4">
-          {/* Fast Mode Toggle */}
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={fastMode}
-              onChange={(e) => setFastMode(e.target.checked)}
-              className="rounded border-gray-300"
-            />
-            <span className="text-gray-600">Fast Mode</span>
-            <span className="text-xs text-gray-400">(~3s/doc)</span>
-          </label>
+          {/* Processing Mode Toggle */}
+          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+            <button
+              onClick={() => setProcessingMode('fast')}
+              className={clsx(
+                'px-3 py-1.5 rounded text-sm font-medium transition-colors',
+                processingMode === 'fast'
+                  ? 'bg-white shadow text-gray-900'
+                  : 'text-gray-600 hover:text-gray-900'
+              )}
+            >
+              Fast
+              <span className="text-xs text-gray-400 ml-1">(~3s)</span>
+            </button>
+            <button
+              onClick={() => setProcessingMode('smart')}
+              className={clsx(
+                'px-3 py-1.5 rounded text-sm font-medium transition-colors',
+                processingMode === 'smart'
+                  ? 'bg-white shadow text-purple-700'
+                  : 'text-gray-600 hover:text-gray-900'
+              )}
+              title="Uses Gemini AI for smarter tagging (requires GOOGLE_API_KEY)"
+            >
+              Smart
+              <span className="text-xs text-gray-400 ml-1">(AI)</span>
+            </button>
+          </div>
           <div className="flex gap-2">
           {totalStats.pending > 0 && (
             <button
