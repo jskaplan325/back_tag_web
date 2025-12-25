@@ -1,0 +1,25 @@
+# FastAPI Backend Requirements
+
+# Web framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6  # For file uploads
+
+# Database
+sqlalchemy>=2.0.0
+aiosqlite>=0.19.0  # Async SQLite support
+
+# HTTP client (for HuggingFace API)
+httpx>=0.25.0
+
+# Validation
+pydantic>=2.5.0
+
+# Document processing (back_tag dependency)
+# Install back_tag from local path or pip:
+# pip install -e ../back_tag
+# Or add to PYTHONPATH
+
+# PDF processing (for page images)
+pdf2image>=1.16.0
+Pillow>=9.5.0
