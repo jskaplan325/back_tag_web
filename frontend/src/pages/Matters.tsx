@@ -774,7 +774,7 @@ function MatterTypeCard({
 export default function Matters() {
   const [showImportModal, setShowImportModal] = useState(false)
   const [processAllTarget, setProcessAllTarget] = useState<{ type: string | null, count: number } | null>(null)
-  const [processingMode, setProcessingMode] = useState<'fast' | 'auto' | 'smart'>('fast')
+  const [processingMode, setProcessingMode] = useState<'fast' | 'smart' | 'auto'>('auto')
   const [showStatusPanel, setShowStatusPanel] = useState(true)  // Processing status panel
   const queryClient = useQueryClient()
 
@@ -858,19 +858,6 @@ export default function Matters() {
               Fast
             </button>
             <button
-              onClick={() => setProcessingMode('auto')}
-              className={clsx(
-                'px-3 py-1.5 rounded text-sm font-medium transition-colors',
-                processingMode === 'auto'
-                  ? 'bg-white shadow text-blue-700'
-                  : 'text-gray-600 hover:text-gray-900'
-              )}
-              title="Auto-select pipeline based on document analysis (OCR, vision, zone, or fast)"
-            >
-              Auto
-              <span className="text-xs text-gray-400 ml-1">✨</span>
-            </button>
-            <button
               onClick={() => setProcessingMode('smart')}
               className={clsx(
                 'px-3 py-1.5 rounded text-sm font-medium transition-colors',
@@ -882,6 +869,19 @@ export default function Matters() {
             >
               Smart
               <span className="text-xs text-gray-400 ml-1">(AI)</span>
+            </button>
+            <button
+              onClick={() => setProcessingMode('auto')}
+              className={clsx(
+                'px-3 py-1.5 rounded text-sm font-medium transition-colors',
+                processingMode === 'auto'
+                  ? 'bg-white shadow text-blue-700'
+                  : 'text-gray-600 hover:text-gray-900'
+              )}
+              title="Auto-select pipeline based on document analysis (OCR, vision, zone, or fast)"
+            >
+              Auto
+              <span className="text-xs text-gray-400 ml-1">✨</span>
             </button>
           </div>
           <div className="flex gap-2">
