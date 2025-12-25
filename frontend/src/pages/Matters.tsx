@@ -620,8 +620,8 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
             </div>
 
             <p className="text-sm text-gray-500 mb-4">
-              Re-importing will create duplicate matters. Use this if you've updated the taxonomy
-              and want to reprocess documents with new tags.
+              Re-importing will <strong>overwrite</strong> existing documents and reset processing status.
+              Use this after updating the taxonomy to reprocess with new tags.
             </p>
 
             <div className="flex justify-end gap-3">

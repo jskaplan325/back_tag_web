@@ -386,7 +386,7 @@ def infer_matter_type(folder_name: str) -> str:
 
 
 def import_matter_folder(db: Session, folder_path: Path, type_override: Optional[str] = None) -> tuple[Optional[Matter], int]:
-    """Import a single folder as a matter with its documents."""
+    """Import a single folder as a matter with its documents. Overwrites if already exists."""
     # Get list of supported files
     files = [f for f in folder_path.iterdir()
              if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS]
@@ -394,19 +394,41 @@ def import_matter_folder(db: Session, folder_path: Path, type_override: Optional
     if not files:
         return None, 0
 
-    # Create matter
-    matter_id = str(uuid.uuid4())
     # Use override if provided, otherwise infer from folder name
     matter_type = type_override if type_override else infer_matter_type(folder_path.name)
 
-    matter = Matter(
-        id=matter_id,
-        name=folder_path.name,
-        matter_type=matter_type,
-        source_path=str(folder_path),
-        document_count=len(files)
-    )
-    db.add(matter)
+    # Check if matter already exists (by source_path)
+    existing_matter = db.query(Matter).filter(Matter.source_path == str(folder_path)).first()
+
+    if existing_matter:
+        # Overwrite: Delete old documents and results, update matter
+        from ..database.db import Result
+
+        # Delete old documents (cascades to results via relationship)
+        old_docs = db.query(Document).filter(Document.matter_id == existing_matter.id).all()
+        for doc in old_docs:
+            # Clean up files
+            doc_dir = UPLOADS_DIR / doc.id
+            if doc_dir.exists():
+                shutil.rmtree(doc_dir)
+            db.delete(doc)
+
+        # Update matter
+        existing_matter.matter_type = matter_type
+        existing_matter.document_count = len(files)
+        matter = existing_matter
+        matter_id = existing_matter.id
+    else:
+        # Create new matter
+        matter_id = str(uuid.uuid4())
+        matter = Matter(
+            id=matter_id,
+            name=folder_path.name,
+            matter_type=matter_type,
+            source_path=str(folder_path),
+            document_count=len(files)
+        )
+        db.add(matter)
 
     # Import each document
     for file_path in files:
