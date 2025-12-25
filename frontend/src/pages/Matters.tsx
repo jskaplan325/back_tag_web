@@ -71,15 +71,16 @@ interface TypeStats {
 }
 
 const matterTypeColors: Record<string, string> = {
-  'Funds': '#3b82f6',
-  'M&A': '#8b5cf6',
+  'Investment Funds': '#3b82f6',
+  'M&A / Corporate': '#8b5cf6',
   'Leveraged Finance': '#10b981',
-  'Real Estate': '#f59e0b',
-  'Intellectual Property': '#ec4899',
-  'Employment': '#06b6d4',
-  'Tax': '#84cc16',
-  'Litigation': '#ef4444',
-  'General': '#6b7280'
+  'Securities / Capital Markets': '#f59e0b',
+  'Contracts / Commercial': '#6b7280',
+  'Real Estate': '#ec4899',
+  'Intellectual Property': '#06b6d4',
+  'Employment': '#84cc16',
+  'Tax': '#14b8a6',
+  'Litigation': '#ef4444'
 }
 
 function ProcessWarningModal({
@@ -216,7 +217,7 @@ function ProcessingStatusPanel({
               const progress = s.document_count > 0
                 ? Math.round((s.completed_count / s.document_count) * 100)
                 : 0
-              const color = matterTypeColors[s.matter_type] || matterTypeColors['General']
+              const color = matterTypeColors[s.matter_type] || '#6b7280'
 
               return (
                 <div key={s.matter_type} className="text-sm">
@@ -502,8 +503,8 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
                                   typeOverrides[folder.path] && "ring-2 ring-blue-400"
                                 )}
                                 style={{
-                                  backgroundColor: `${matterTypeColors[getEffectiveType(folder)] || matterTypeColors['General']}20`,
-                                  color: matterTypeColors[getEffectiveType(folder)] || matterTypeColors['General']
+                                  backgroundColor: `${matterTypeColors[getEffectiveType(folder)] || '#6b7280'}20`,
+                                  color: matterTypeColors[getEffectiveType(folder)] || '#6b7280'
                                 }}
                                 title="Click to change type"
                               >
@@ -665,7 +666,7 @@ function MatterTypeCard({
   onProcessAll: () => void
   isProcessing: boolean
 }) {
-  const color = matterTypeColors[stats.matter_type] || matterTypeColors['General']
+  const color = matterTypeColors[stats.matter_type] || '#6b7280'
   const hasNew = stats.pending_count > 0
   const hasAny = stats.document_count > 0
 
