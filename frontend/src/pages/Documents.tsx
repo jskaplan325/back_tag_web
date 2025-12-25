@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
@@ -11,10 +11,20 @@ import {
   Clock,
   CheckCircle,
   XCircle,
-  Loader2
+  Loader2,
+  Search,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react'
 import clsx from 'clsx'
 import api from '../api'
+
+interface MatterBrief {
+  id: string
+  name: string
+  matter_type: string | null
+}
 
 interface Document {
   id: string
@@ -25,7 +35,13 @@ interface Document {
   word_count: number | null
   status: string
   error_message: string | null
+  matter_id: string | null
+  matter: MatterBrief | null
+  average_confidence: number | null
 }
+
+type SortField = 'filename' | 'confidence' | 'uploaded_at'
+type SortDirection = 'asc' | 'desc'
 
 function UploadModal({ onClose }: { onClose: () => void }) {
   const [file, setFile] = useState<File | null>(null)
@@ -240,12 +256,15 @@ export default function Documents() {
   const [searchParams, setSearchParams] = useSearchParams()
   const showUpload = searchParams.get('upload') === 'true'
   const [processDoc, setProcessDoc] = useState<Document | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [sortField, setSortField] = useState<SortField>('uploaded_at')
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
 
   const queryClient = useQueryClient()
 
   const { data: documents, isLoading } = useQuery<Document[]>({
-    queryKey: ['documents'],
-    queryFn: () => api.get('/api/documents').then(r => r.data),
+    queryKey: ['documents', searchQuery],
+    queryFn: () => api.get(`/api/documents${searchQuery ? `?search=${encodeURIComponent(searchQuery)}` : ''}`).then(r => r.data),
     refetchInterval: 5000, // Poll for status updates
   })
 
@@ -261,43 +280,135 @@ export default function Documents() {
     setSearchParams(searchParams)
   }
 
+  // Sort documents
+  const sortedDocuments = useMemo(() => {
+    if (!documents) return []
+    return [...documents].sort((a, b) => {
+      let comparison = 0
+      switch (sortField) {
+        case 'filename':
+          comparison = a.filename.localeCompare(b.filename)
+          break
+        case 'confidence':
+          comparison = (a.average_confidence ?? 0) - (b.average_confidence ?? 0)
+          break
+        case 'uploaded_at':
+          comparison = new Date(a.uploaded_at).getTime() - new Date(b.uploaded_at).getTime()
+          break
+      }
+      return sortDirection === 'asc' ? comparison : -comparison
+    })
+  }, [documents, sortField, sortDirection])
+
+  const toggleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(d => d === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
+      setSortDirection(field === 'confidence' ? 'asc' : 'desc') // Low confidence first to review
+    }
+  }
+
+  const SortIcon = ({ field }: { field: SortField }) => {
+    if (sortField !== field) return <ArrowUpDown className="h-3 w-3 opacity-50" />
+    return sortDirection === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+  }
+
   return (
     <div className="p-8">
       <div className="flex items-center justify-between mb-8">
         <h1 className="text-2xl font-bold text-gray-900">Documents</h1>
-        <button
-          onClick={() => setSearchParams({ upload: 'true' })}
-          className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
-        >
-          <Upload className="h-4 w-4" />
-          Upload
-        </button>
+        <div className="flex items-center gap-4">
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search documents or matters..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-64 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <button
+            onClick={() => setSearchParams({ upload: 'true' })}
+            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+          >
+            <Upload className="h-4 w-4" />
+            Upload
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
         </div>
-      ) : documents && documents.length > 0 ? (
+      ) : sortedDocuments.length > 0 ? (
         <div className="rounded-lg bg-white shadow overflow-hidden">
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-sm font-medium text-gray-500">Document</th>
+                <th
+                  className="px-6 py-3 text-left text-sm font-medium text-gray-500 cursor-pointer hover:bg-gray-100"
+                  onClick={() => toggleSort('filename')}
+                >
+                  <div className="flex items-center gap-1">
+                    Document
+                    <SortIcon field="filename" />
+                  </div>
+                </th>
+                <th className="px-6 py-3 text-left text-sm font-medium text-gray-500">Matter</th>
                 <th className="px-6 py-3 text-left text-sm font-medium text-gray-500">Status</th>
-                <th className="px-6 py-3 text-left text-sm font-medium text-gray-500">Words</th>
-                <th className="px-6 py-3 text-left text-sm font-medium text-gray-500">Uploaded</th>
+                <th
+                  className="px-6 py-3 text-left text-sm font-medium text-gray-500 cursor-pointer hover:bg-gray-100"
+                  onClick={() => toggleSort('confidence')}
+                >
+                  <div className="flex items-center gap-1">
+                    Confidence
+                    <SortIcon field="confidence" />
+                  </div>
+                </th>
+                <th
+                  className="px-6 py-3 text-left text-sm font-medium text-gray-500 cursor-pointer hover:bg-gray-100"
+                  onClick={() => toggleSort('uploaded_at')}
+                >
+                  <div className="flex items-center gap-1">
+                    Uploaded
+                    <SortIcon field="uploaded_at" />
+                  </div>
+                </th>
                 <th className="px-6 py-3 text-right text-sm font-medium text-gray-500">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {documents.map((doc) => (
+              {sortedDocuments.map((doc) => (
                 <tr key={doc.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       <FileText className="h-5 w-5 text-gray-400" />
                       <span className="font-medium">{doc.filename}</span>
                     </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    {doc.matter ? (
+                      <Link
+                        to={`/matters/${doc.matter.id}`}
+                        className="text-blue-600 hover:underline text-sm"
+                      >
+                        {doc.matter.name}
+                      </Link>
+                    ) : (
+                      <span className="text-gray-400 text-sm">-</span>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     <span className={clsx(
@@ -314,8 +425,19 @@ export default function Documents() {
                       {doc.status}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-gray-500">
-                    {doc.word_count?.toLocaleString() ?? '-'}
+                  <td className="px-6 py-4">
+                    {doc.average_confidence != null ? (
+                      <span className={clsx(
+                        'font-medium',
+                        doc.average_confidence >= 0.7 && 'text-green-600',
+                        doc.average_confidence >= 0.5 && doc.average_confidence < 0.7 && 'text-yellow-600',
+                        doc.average_confidence < 0.5 && 'text-red-600'
+                      )}>
+                        {(doc.average_confidence * 100).toFixed(0)}%
+                      </span>
+                    ) : (
+                      <span className="text-gray-400">-</span>
+                    )}
                   </td>
                   <td className="px-6 py-4 text-gray-500">
                     {new Date(doc.uploaded_at).toLocaleDateString()}
@@ -357,6 +479,18 @@ export default function Documents() {
               ))}
             </tbody>
           </table>
+        </div>
+      ) : searchQuery ? (
+        <div className="rounded-lg bg-white p-12 shadow text-center">
+          <Search className="mx-auto h-12 w-12 text-gray-400" />
+          <h3 className="mt-4 text-lg font-medium">No results found</h3>
+          <p className="mt-2 text-gray-500">No documents match "{searchQuery}"</p>
+          <button
+            onClick={() => setSearchQuery('')}
+            className="mt-4 text-blue-600 hover:underline"
+          >
+            Clear search
+          </button>
         </div>
       ) : (
         <div className="rounded-lg bg-white p-12 shadow text-center">

@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .database.db import init_db
-from .routers import documents, results, models, metrics, taxonomy
+from .routers import documents, results, models, metrics, taxonomy, matters
 
 # Configuration
 DATA_DIR = Path(os.getenv("DATA_DIR", "./data"))
@@ -58,6 +58,7 @@ app.include_router(results.router, prefix="/api/results", tags=["Results"])
 app.include_router(models.router, prefix="/api/models", tags=["Models"])
 app.include_router(metrics.router, prefix="/api/metrics", tags=["Metrics"])
 app.include_router(taxonomy.router, prefix="/api/taxonomy", tags=["Taxonomy"])
+app.include_router(matters.router, prefix="/api/matters", tags=["Matters"])
 
 
 @app.get("/")

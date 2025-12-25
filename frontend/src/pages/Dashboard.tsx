@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { FileText, CheckCircle, TrendingUp, Clock, Tag } from 'lucide-react'
+import { FileText, CheckCircle, TrendingUp, Clock, Tag, Filter, X } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { Link } from 'react-router-dom'
 import api from '../api'
@@ -51,14 +52,21 @@ function StatCard({ title, value, icon: Icon, color }: {
 }
 
 export default function Dashboard() {
+  const [filterType, setFilterType] = useState<string | null>(null)
+
+  const { data: matterTypes } = useQuery<string[]>({
+    queryKey: ['metrics', 'matter-types'],
+    queryFn: () => api.get('/api/metrics/matter-types').then(r => r.data),
+  })
+
   const { data: summary } = useQuery<DashboardSummary>({
-    queryKey: ['metrics', 'summary'],
-    queryFn: () => api.get('/api/metrics/summary').then(r => r.data),
+    queryKey: ['metrics', 'summary', filterType],
+    queryFn: () => api.get(`/api/metrics/summary${filterType ? `?matter_type=${encodeURIComponent(filterType)}` : ''}`).then(r => r.data),
   })
 
   const { data: trends } = useQuery<ProcessingTrend[]>({
-    queryKey: ['metrics', 'processing'],
-    queryFn: () => api.get('/api/metrics/processing?days=14').then(r => r.data),
+    queryKey: ['metrics', 'processing', filterType],
+    queryFn: () => api.get(`/api/metrics/processing?days=14${filterType ? `&matter_type=${encodeURIComponent(filterType)}` : ''}`).then(r => r.data),
   })
 
   const { data: recentDocs } = useQuery<RecentDocument[]>({
@@ -68,7 +76,36 @@ export default function Dashboard() {
 
   return (
     <div className="p-8">
-      <h1 className="text-2xl font-bold text-gray-900 mb-8">Dashboard</h1>
+      <div className="flex items-center justify-between mb-8">
+        <h1 className="text-2xl font-bold text-gray-900">
+          Dashboard
+          {filterType && (
+            <span className="ml-2 text-lg font-normal text-gray-500">- {filterType}</span>
+          )}
+        </h1>
+        <div className="flex items-center gap-2">
+          <Filter className="h-4 w-4 text-gray-400" />
+          <select
+            value={filterType || ''}
+            onChange={(e) => setFilterType(e.target.value || null)}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white"
+          >
+            <option value="">All Types</option>
+            {matterTypes?.map(type => (
+              <option key={type} value={type}>{type}</option>
+            ))}
+          </select>
+          {filterType && (
+            <button
+              onClick={() => setFilterType(null)}
+              className="text-gray-400 hover:text-gray-600"
+              title="Clear filter"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">

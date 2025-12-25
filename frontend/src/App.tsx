@@ -4,8 +4,8 @@ import {
   FileText,
   Box,
   BarChart3,
-  Upload,
-  Scale
+  Scale,
+  FolderOpen
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -18,10 +18,14 @@ import ModelDetail from './pages/ModelDetail'
 import Metrics from './pages/Metrics'
 import Taxonomy from './pages/Taxonomy'
 import TaxonomyDetail from './pages/TaxonomyDetail'
+import Matters from './pages/Matters'
+import MatterDetail from './pages/MatterDetail'
+import MattersByType from './pages/MattersByType'
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Documents', href: '/documents', icon: FileText },
+  { name: 'Matters', href: '/matters', icon: FolderOpen },
   { name: 'Taxonomy', href: '/taxonomy', icon: Scale },
   { name: 'Models', href: '/models', icon: Box },
   { name: 'Metrics', href: '/metrics', icon: BarChart3 },
@@ -56,15 +60,6 @@ function Sidebar() {
           )
         })}
       </nav>
-      <div className="p-4">
-        <Link
-          to="/documents?upload=true"
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-        >
-          <Upload className="h-4 w-4" />
-          Upload Document
-        </Link>
-      </div>
     </div>
   )
 }
@@ -78,6 +73,9 @@ function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/documents" element={<Documents />} />
           <Route path="/documents/:id" element={<DocumentViewer />} />
+          <Route path="/matters" element={<Matters />} />
+          <Route path="/matters/type/:type" element={<MattersByType />} />
+          <Route path="/matters/:id" element={<MatterDetail />} />
           <Route path="/taxonomy" element={<Taxonomy />} />
           <Route path="/taxonomy/:id" element={<TaxonomyDetail />} />
           <Route path="/models" element={<Models />} />

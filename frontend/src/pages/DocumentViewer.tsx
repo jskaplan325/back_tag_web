@@ -11,7 +11,9 @@ import {
   Table,
   FileText,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  Image,
+  AlignLeft
 } from 'lucide-react'
 import clsx from 'clsx'
 import api from '../api'
@@ -110,10 +112,17 @@ function PageThumbnail({
   )
 }
 
+interface TextContent {
+  document_id: string
+  text: string
+  filename: string
+}
+
 export default function DocumentViewer() {
   const { id } = useParams<{ id: string }>()
   const [currentPage, setCurrentPage] = useState(1)
   const [zoom, setZoom] = useState(1)
+  const [viewMode, setViewMode] = useState<'auto' | 'text' | 'image'>('auto')
 
   const { data: document, isLoading: docLoading } = useQuery<DocumentDetail>({
     queryKey: ['document', id],
@@ -126,7 +135,17 @@ export default function DocumentViewer() {
     enabled: !!document && document.status === 'completed',
   })
 
+  const { data: textContent, isLoading: textLoading } = useQuery<TextContent>({
+    queryKey: ['document', id, 'text'],
+    queryFn: () => api.get(`/api/documents/${id}/text`).then(r => r.data),
+    enabled: !!document,
+  })
+
   const isLoading = docLoading || resultLoading
+
+  // Determine if we should show text view
+  const isTextFile = document?.filename?.toLowerCase().endsWith('.txt')
+  const showTextView = viewMode === 'text' || (viewMode === 'auto' && isTextFile)
 
   if (isLoading) {
     return (
@@ -172,77 +191,135 @@ export default function DocumentViewer() {
           </Link>
           <h1 className="text-lg font-semibold">{document.filename}</h1>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setZoom(z => Math.max(0.5, z - 0.25))}
-            className="p-2 hover:bg-gray-100 rounded"
-          >
-            <ZoomOut className="h-4 w-4" />
-          </button>
-          <span className="text-sm text-gray-600">{Math.round(zoom * 100)}%</span>
-          <button
-            onClick={() => setZoom(z => Math.min(3, z + 0.25))}
-            className="p-2 hover:bg-gray-100 rounded"
-          >
-            <ZoomIn className="h-4 w-4" />
-          </button>
+        <div className="flex items-center gap-4">
+          {/* View mode toggle */}
+          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+            <button
+              onClick={() => setViewMode('text')}
+              className={clsx(
+                'flex items-center gap-1 px-3 py-1.5 rounded text-sm transition-colors',
+                showTextView ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'
+              )}
+            >
+              <AlignLeft className="h-4 w-4" />
+              Text
+            </button>
+            <button
+              onClick={() => setViewMode('image')}
+              disabled={isTextFile}
+              className={clsx(
+                'flex items-center gap-1 px-3 py-1.5 rounded text-sm transition-colors',
+                !showTextView ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900',
+                isTextFile && 'opacity-50 cursor-not-allowed'
+              )}
+            >
+              <Image className="h-4 w-4" />
+              Pages
+            </button>
+          </div>
+          {/* Zoom controls - only for image view */}
+          {!showTextView && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setZoom(z => Math.max(0.5, z - 0.25))}
+                className="p-2 hover:bg-gray-100 rounded"
+              >
+                <ZoomOut className="h-4 w-4" />
+              </button>
+              <span className="text-sm text-gray-600">{Math.round(zoom * 100)}%</span>
+              <button
+                onClick={() => setZoom(z => Math.min(3, z + 0.25))}
+                className="p-2 hover:bg-gray-100 rounded"
+              >
+                <ZoomIn className="h-4 w-4" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left Sidebar - Page Thumbnails */}
-        <div className="w-48 border-r bg-gray-50 overflow-y-auto p-3 space-y-2">
-          <div className="mb-3">
-            <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider">Pages</h3>
-            {visualPages && (
-              <div className="mt-2 space-y-1 text-xs">
-                {visualPages.visual_pages?.length > 0 && (
-                  <div className="flex items-center gap-1">
-                    <span className="w-3 h-3 rounded bg-yellow-500" />
-                    <span>{visualPages.visual_pages.length} charts/images</span>
-                  </div>
-                )}
-                {visualPages.table_pages?.length > 0 && (
-                  <div className="flex items-center gap-1">
-                    <span className="w-3 h-3 rounded bg-blue-500" />
-                    <span>{visualPages.table_pages.length} tables</span>
-                  </div>
-                )}
-                {visualPages.sparse_pages?.length > 0 && (
-                  <div className="flex items-center gap-1">
-                    <span className="w-3 h-3 rounded bg-purple-500" />
-                    <span>{visualPages.sparse_pages.length} sparse</span>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-          {Array.from({ length: pageCount }, (_, i) => i + 1).map(page => (
-            <PageThumbnail
-              key={page}
-              page={page}
-              documentId={document.id}
-              isActive={page === currentPage}
-              visualType={getVisualType(page)}
-              onClick={() => setCurrentPage(page)}
-            />
-          ))}
-        </div>
-
-        {/* Center - Page Viewer */}
-        <div className="flex-1 overflow-auto bg-gray-200 p-4">
-          <div className="flex items-center justify-center min-h-full">
-            <div
-              style={{ transform: `scale(${zoom})`, transformOrigin: 'center' }}
-              className="transition-transform"
-            >
-              <img
-                src={`/api/documents/${document.id}/pages/${currentPage}`}
-                alt={`Page ${currentPage}`}
-                className="max-w-none shadow-lg bg-white"
-              />
+        {/* Left Sidebar - Page Thumbnails (only for image view) */}
+        {!showTextView && (
+          <div className="w-48 border-r bg-gray-50 overflow-y-auto p-3 space-y-2">
+            <div className="mb-3">
+              <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider">Pages</h3>
+              {visualPages && (
+                <div className="mt-2 space-y-1 text-xs">
+                  {visualPages.visual_pages?.length > 0 && (
+                    <div className="flex items-center gap-1">
+                      <span className="w-3 h-3 rounded bg-yellow-500" />
+                      <span>{visualPages.visual_pages.length} charts/images</span>
+                    </div>
+                  )}
+                  {visualPages.table_pages?.length > 0 && (
+                    <div className="flex items-center gap-1">
+                      <span className="w-3 h-3 rounded bg-blue-500" />
+                      <span>{visualPages.table_pages.length} tables</span>
+                    </div>
+                  )}
+                  {visualPages.sparse_pages?.length > 0 && (
+                    <div className="flex items-center gap-1">
+                      <span className="w-3 h-3 rounded bg-purple-500" />
+                      <span>{visualPages.sparse_pages.length} sparse</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
+            {Array.from({ length: pageCount }, (_, i) => i + 1).map(page => (
+              <PageThumbnail
+                key={page}
+                page={page}
+                documentId={document.id}
+                isActive={page === currentPage}
+                visualType={getVisualType(page)}
+                onClick={() => setCurrentPage(page)}
+              />
+            ))}
           </div>
+        )}
+
+        {/* Center - Content Viewer */}
+        <div className="flex-1 overflow-auto bg-gray-200 p-4">
+          {showTextView ? (
+            /* Text View */
+            <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-lg p-8">
+              {textLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                </div>
+              ) : textContent?.text ? (
+                <pre className="whitespace-pre-wrap font-mono text-sm text-gray-800 leading-relaxed">
+                  {textContent.text}
+                </pre>
+              ) : (
+                <div className="text-center text-gray-400 py-12">
+                  <FileText className="mx-auto h-12 w-12 mb-4" />
+                  <p>No text content available</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Image/Page View */
+            <div className="flex items-center justify-center min-h-full">
+              <div
+                style={{ transform: `scale(${zoom})`, transformOrigin: 'center' }}
+                className="transition-transform"
+              >
+                <img
+                  src={`/api/documents/${document.id}/pages/${currentPage}`}
+                  alt={`Page ${currentPage}`}
+                  className="max-w-none shadow-lg bg-white"
+                  onError={(e) => {
+                    // If image fails to load, switch to text view
+                    const target = e.target as HTMLImageElement
+                    target.style.display = 'none'
+                  }}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right Sidebar - Tags & Info */}
@@ -331,26 +408,28 @@ export default function DocumentViewer() {
         </div>
       </div>
 
-      {/* Footer Navigation */}
-      <div className="flex items-center justify-center gap-4 border-t bg-white py-3">
-        <button
-          onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-          disabled={currentPage === 1}
-          className="p-2 hover:bg-gray-100 rounded disabled:opacity-50"
-        >
-          <ChevronLeft className="h-5 w-5" />
-        </button>
-        <span className="text-sm">
-          Page {currentPage} of {pageCount}
-        </span>
-        <button
-          onClick={() => setCurrentPage(p => Math.min(pageCount, p + 1))}
-          disabled={currentPage === pageCount}
-          className="p-2 hover:bg-gray-100 rounded disabled:opacity-50"
-        >
-          <ChevronRight className="h-5 w-5" />
-        </button>
-      </div>
+      {/* Footer Navigation - only for image view */}
+      {!showTextView && (
+        <div className="flex items-center justify-center gap-4 border-t bg-white py-3">
+          <button
+            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+            className="p-2 hover:bg-gray-100 rounded disabled:opacity-50"
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </button>
+          <span className="text-sm">
+            Page {currentPage} of {pageCount}
+          </span>
+          <button
+            onClick={() => setCurrentPage(p => Math.min(pageCount, p + 1))}
+            disabled={currentPage === pageCount}
+            className="p-2 hover:bg-gray-100 rounded disabled:opacity-50"
+          >
+            <ChevronRight className="h-5 w-5" />
+          </button>
+        </div>
+      )}
     </div>
   )
 }

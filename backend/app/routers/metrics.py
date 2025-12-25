@@ -9,9 +9,16 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from pydantic import BaseModel
 
-from ..database.db import get_db, Document, Result, Model, ModelUsage, APICost
+from ..database.db import get_db, Document, Result, Model, ModelUsage, APICost, Matter
 
 router = APIRouter()
+
+
+@router.get("/matter-types")
+async def get_matter_types(db: Session = Depends(get_db)):
+    """Get list of available matter types for filtering."""
+    types = db.query(Matter.matter_type).distinct().all()
+    return [t[0] for t in types if t[0]]
 
 
 class DashboardSummary(BaseModel):
@@ -49,14 +56,29 @@ class CostSummary(BaseModel):
 
 
 @router.get("/summary", response_model=DashboardSummary)
-async def get_dashboard_summary(db: Session = Depends(get_db)):
-    """Get overall dashboard statistics."""
-    total_docs = db.query(Document).count()
-    completed = db.query(Document).filter(Document.status == "completed").count()
-    failed = db.query(Document).filter(Document.status == "failed").count()
+async def get_dashboard_summary(
+    matter_type: Optional[str] = Query(None, description="Filter by matter type"),
+    db: Session = Depends(get_db)
+):
+    """Get overall dashboard statistics, optionally filtered by matter type."""
+    # Base document query
+    doc_query = db.query(Document)
+    if matter_type:
+        # Filter by matter type through the matter relationship
+        doc_query = doc_query.join(Matter).filter(Matter.matter_type == matter_type)
+
+    total_docs = doc_query.count()
+    completed = doc_query.filter(Document.status == "completed").count()
+    failed = doc_query.filter(Document.status == "failed").count()
 
     # Get average confidence and processing time from results
-    results = db.query(Result).all()
+    if matter_type:
+        # Get document IDs for this matter type
+        doc_ids = [d.id for d in doc_query.all()]
+        results = db.query(Result).filter(Result.document_id.in_(doc_ids)).all() if doc_ids else []
+    else:
+        results = db.query(Result).all()
+
     if results:
         avg_confidence = sum(r.average_confidence or 0 for r in results) / len(results)
         avg_time = sum(r.processing_time_seconds or 0 for r in results) / len(results)
@@ -84,12 +106,18 @@ async def get_dashboard_summary(db: Session = Depends(get_db)):
 @router.get("/processing", response_model=List[ProcessingTrend])
 async def get_processing_trends(
     days: int = Query(30, ge=1, le=365),
+    matter_type: Optional[str] = Query(None, description="Filter by matter type"),
     db: Session = Depends(get_db)
 ):
-    """Get processing trends over time."""
+    """Get processing trends over time, optionally filtered by matter type."""
     cutoff = datetime.utcnow() - timedelta(days=days)
 
-    results = db.query(Result).filter(Result.processed_at >= cutoff).all()
+    if matter_type:
+        # Get document IDs for this matter type
+        doc_ids = [d.id for d in db.query(Document).join(Matter).filter(Matter.matter_type == matter_type).all()]
+        results = db.query(Result).filter(Result.processed_at >= cutoff, Result.document_id.in_(doc_ids)).all() if doc_ids else []
+    else:
+        results = db.query(Result).filter(Result.processed_at >= cutoff).all()
 
     # Group by date
     trends_by_date = {}

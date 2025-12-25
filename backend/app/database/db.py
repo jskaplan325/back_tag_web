@@ -30,11 +30,28 @@ Base = declarative_base()
 
 
 # Models
+class Matter(Base):
+    """Matter/project grouping for documents."""
+    __tablename__ = "matters"
+
+    id = Column(String(36), primary_key=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    matter_type = Column(String(100), nullable=True)  # Funds, M&A, LevFin, etc.
+    source_path = Column(String(512), nullable=True)  # Original folder path if bulk imported
+    created_at = Column(DateTime, default=datetime.utcnow)
+    document_count = Column(Integer, default=0)
+
+    # Relationships
+    documents = relationship("Document", back_populates="matter", cascade="all, delete-orphan")
+
+
 class Document(Base):
     """Uploaded document record."""
     __tablename__ = "documents"
 
     id = Column(String(36), primary_key=True)
+    matter_id = Column(String(36), ForeignKey("matters.id"), nullable=True)
     filename = Column(String(255), nullable=False)
     filepath = Column(String(512), nullable=False)
     uploaded_at = Column(DateTime, default=datetime.utcnow)
@@ -45,6 +62,7 @@ class Document(Base):
     error_message = Column(Text, nullable=True)
 
     # Relationships
+    matter = relationship("Matter", back_populates="documents")
     results = relationship("Result", back_populates="document", cascade="all, delete-orphan")
 
 

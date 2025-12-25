@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
-from ..database.db import get_db, Document, Result
+from ..database.db import get_db, Document, Result, Matter
 
 router = APIRouter()
 
@@ -23,6 +23,15 @@ UPLOADS_DIR = DATA_DIR / "uploads"
 
 
 # Pydantic schemas
+class MatterBrief(BaseModel):
+    id: str
+    name: str
+    matter_type: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
 class DocumentResponse(BaseModel):
     id: str
     filename: str
@@ -32,6 +41,9 @@ class DocumentResponse(BaseModel):
     word_count: Optional[int]
     status: str
     error_message: Optional[str]
+    matter_id: Optional[str] = None
+    matter: Optional[MatterBrief] = None
+    average_confidence: Optional[float] = None
 
     class Config:
         from_attributes = True
@@ -96,14 +108,59 @@ async def list_documents(
     skip: int = 0,
     limit: int = 100,
     status: Optional[str] = None,
+    matter_id: Optional[str] = None,
+    search: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """List all documents."""
+    """List all documents with optional search and filtering."""
     query = db.query(Document)
     if status:
         query = query.filter(Document.status == status)
+    if matter_id:
+        query = query.filter(Document.matter_id == matter_id)
+
+    # Search by filename or matter name
+    if search:
+        search_term = f"%{search}%"
+        query = query.outerjoin(Matter).filter(
+            (Document.filename.ilike(search_term)) |
+            (Matter.name.ilike(search_term))
+        )
+
     documents = query.order_by(Document.uploaded_at.desc()).offset(skip).limit(limit).all()
-    return documents
+
+    # Build response with matter info and confidence
+    response = []
+    for doc in documents:
+        # Get latest result for confidence
+        latest_result = db.query(Result).filter(
+            Result.document_id == doc.id
+        ).order_by(Result.processed_at.desc()).first()
+
+        doc_dict = {
+            "id": doc.id,
+            "filename": doc.filename,
+            "uploaded_at": doc.uploaded_at,
+            "file_size_bytes": doc.file_size_bytes,
+            "page_count": doc.page_count,
+            "word_count": doc.word_count,
+            "status": doc.status,
+            "error_message": doc.error_message,
+            "matter_id": doc.matter_id,
+            "matter": None,
+            "average_confidence": latest_result.average_confidence if latest_result else None
+        }
+        if doc.matter_id:
+            matter = db.query(Matter).filter(Matter.id == doc.matter_id).first()
+            if matter:
+                doc_dict["matter"] = {
+                    "id": matter.id,
+                    "name": matter.name,
+                    "matter_type": matter.matter_type
+                }
+        response.append(doc_dict)
+
+    return response
 
 
 @router.get("/{document_id}", response_model=DocumentResponse)
@@ -170,12 +227,51 @@ async def process_document(
     )
 
 
+@router.get("/{document_id}/text")
+async def get_document_text(document_id: str, db: Session = Depends(get_db)):
+    """Get the extracted text content of a document."""
+    document = db.query(Document).filter(Document.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    filepath = Path(document.filepath)
+    ext = filepath.suffix.lower()
+
+    try:
+        if ext == '.txt':
+            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                text = f.read()
+        elif ext == '.pdf':
+            # Try pdfplumber first
+            try:
+                import pdfplumber
+                with pdfplumber.open(filepath) as pdf:
+                    text = '\n\n'.join([p.extract_text() or '' for p in pdf.pages])
+            except ImportError:
+                from pypdf import PdfReader
+                reader = PdfReader(str(filepath))
+                text = '\n\n'.join([p.extract_text() or '' for p in reader.pages])
+        else:
+            # Try as text
+            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                text = f.read()
+
+        return {"document_id": document_id, "text": text, "filename": document.filename}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to extract text: {str(e)}")
+
+
 @router.get("/{document_id}/pages/{page_num}")
 async def get_page_image(document_id: str, page_num: int, db: Session = Depends(get_db)):
     """Get a page image from a processed document."""
     document = db.query(Document).filter(Document.id == document_id).first()
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
+
+    # Check if this is a text file - no page images available
+    filepath = Path(document.filepath)
+    if filepath.suffix.lower() in ['.txt', '.text']:
+        raise HTTPException(status_code=400, detail="Text files do not have page images")
 
     # Check for cached page image
     page_image_path = UPLOADS_DIR / document_id / f"page_{page_num}.png"
@@ -247,7 +343,8 @@ def run_pipeline(
     vision_model: str
 ):
     """Run the document tagging pipeline (background task)."""
-    from ..database.db import SessionLocal, Document, Result
+    from ..database.db import SessionLocal, Document, Result, Model, ModelUsage
+    import time
 
     db = SessionLocal()
     try:
@@ -262,31 +359,59 @@ def run_pipeline(
                 sys.path.insert(0, str(back_tag_path))
             from back_tag import DocumentTagger
 
-        # Initialize tagger
-        tagger = DocumentTagger(
-            semantic_model=semantic_model,
-            use_gpu=True,
-            enable_vision=enable_vision,
-            vision_model=vision_model
-        )
+        # Check file type
+        file_ext = Path(filepath).suffix.lower()
 
-        # Process document
-        result_data = tagger.process_document(filepath)
+        if file_ext == '.txt':
+            # Handle text files directly
+            start_time = time.time()
 
-        # Get page count from PDF
-        try:
-            from pdf2image import pdfinfo_from_path
-            pdf_info = pdfinfo_from_path(filepath)
-            page_count = pdf_info.get('Pages', 0)
-        except Exception:
-            page_count = result_data.get('page_count', 0)
+            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                text_content = f.read()
+
+            word_count = len(text_content.split())
+
+            # Initialize tagger for text processing only
+            tagger = DocumentTagger(
+                semantic_model=semantic_model,
+                use_gpu=True,
+                enable_vision=False,  # No vision for text files
+                vision_model=None
+            )
+
+            # Process text directly using the tagger's text processing
+            result_data = tagger.process_text(text_content)
+            result_data['processing_time_seconds'] = time.time() - start_time
+            result_data['word_count'] = word_count
+            page_count = 1  # Text files are single page
+
+        else:
+            # Initialize tagger for PDF processing
+            tagger = DocumentTagger(
+                semantic_model=semantic_model,
+                use_gpu=True,
+                enable_vision=enable_vision,
+                vision_model=vision_model
+            )
+
+            # Process document (PDF)
+            result_data = tagger.process_document(filepath)
+
+            # Get page count from PDF
+            try:
+                from pdf2image import pdfinfo_from_path
+                pdf_info = pdfinfo_from_path(filepath)
+                page_count = pdf_info.get('Pages', 0)
+            except Exception:
+                page_count = result_data.get('page_count', 0)
 
         # Create result record
+        processing_time = result_data.get('processing_time_seconds', 0)
         result_id = str(uuid.uuid4())
         result = Result(
             id=result_id,
             document_id=document_id,
-            processing_time_seconds=result_data.get('processing_time_seconds'),
+            processing_time_seconds=processing_time,
             semantic_model=semantic_model,
             vision_model=vision_model if enable_vision else None,
             vision_enabled=enable_vision,
@@ -296,6 +421,49 @@ def run_pipeline(
             visual_pages=result_data.get('visual_pages')
         )
         db.add(result)
+
+        # Get or create semantic model in registry
+        model = db.query(Model).filter(Model.name == semantic_model).first()
+        if not model:
+            model = Model(
+                id=str(uuid.uuid4()),
+                name=semantic_model,
+                type='semantic',
+                huggingface_url=f'https://huggingface.co/{semantic_model}',
+                approved=True
+            )
+            db.add(model)
+            db.flush()
+
+        # Create model usage record
+        model_usage = ModelUsage(
+            id=str(uuid.uuid4()),
+            model_id=model.id,
+            result_id=result_id,
+            processing_time_seconds=processing_time
+        )
+        db.add(model_usage)
+
+        # If vision model was used, track that too
+        if enable_vision and vision_model:
+            vision_model_record = db.query(Model).filter(Model.name == vision_model).first()
+            if not vision_model_record:
+                vision_model_record = Model(
+                    id=str(uuid.uuid4()),
+                    name=vision_model,
+                    type='vision',
+                    huggingface_url=f'https://huggingface.co/{vision_model}',
+                    approved=True
+                )
+                db.add(vision_model_record)
+                db.flush()
+            vision_usage = ModelUsage(
+                id=str(uuid.uuid4()),
+                model_id=vision_model_record.id,
+                result_id=result_id,
+                processing_time_seconds=processing_time * 0.3  # Estimate vision portion
+            )
+            db.add(vision_usage)
 
         # Update document
         document = db.query(Document).filter(Document.id == document_id).first()

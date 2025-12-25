@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   LineChart,
@@ -13,7 +14,7 @@ import {
   ResponsiveContainer,
   Legend
 } from 'recharts'
-import { Clock, DollarSign, TrendingUp, Activity, Loader2 } from 'lucide-react'
+import { Clock, DollarSign, TrendingUp, Activity, Loader2, Filter, X } from 'lucide-react'
 import api from '../api'
 
 interface DashboardSummary {
@@ -36,8 +37,10 @@ interface ProcessingTrend {
 
 interface ModelUsage {
   model_name: string
+  model_type: string
   usage_count: number
-  avg_time: number
+  total_processing_time: number
+  approved: boolean
 }
 
 interface CostBreakdown {
@@ -73,14 +76,21 @@ function StatCard({ title, value, icon: Icon, color, subtitle }: {
 }
 
 export default function Metrics() {
+  const [filterType, setFilterType] = useState<string | null>(null)
+
+  const { data: matterTypes } = useQuery<string[]>({
+    queryKey: ['metrics', 'matter-types'],
+    queryFn: () => api.get('/api/metrics/matter-types').then(r => r.data),
+  })
+
   const { data: summary, isLoading: summaryLoading } = useQuery<DashboardSummary>({
-    queryKey: ['metrics', 'summary'],
-    queryFn: () => api.get('/api/metrics/summary').then(r => r.data),
+    queryKey: ['metrics', 'summary', filterType],
+    queryFn: () => api.get(`/api/metrics/summary${filterType ? `?matter_type=${encodeURIComponent(filterType)}` : ''}`).then(r => r.data),
   })
 
   const { data: trends, isLoading: trendsLoading } = useQuery<ProcessingTrend[]>({
-    queryKey: ['metrics', 'processing'],
-    queryFn: () => api.get('/api/metrics/processing?days=30').then(r => r.data),
+    queryKey: ['metrics', 'processing', filterType],
+    queryFn: () => api.get(`/api/metrics/processing?days=30${filterType ? `&matter_type=${encodeURIComponent(filterType)}` : ''}`).then(r => r.data),
   })
 
   const { data: modelUsage, isLoading: usageLoading } = useQuery<ModelUsage[]>({
@@ -107,7 +117,36 @@ export default function Metrics() {
 
   return (
     <div className="p-8">
-      <h1 className="text-2xl font-bold text-gray-900 mb-8">Metrics & Analytics</h1>
+      <div className="flex items-center justify-between mb-8">
+        <h1 className="text-2xl font-bold text-gray-900">
+          Metrics & Analytics
+          {filterType && (
+            <span className="ml-2 text-lg font-normal text-gray-500">- {filterType}</span>
+          )}
+        </h1>
+        <div className="flex items-center gap-2">
+          <Filter className="h-4 w-4 text-gray-400" />
+          <select
+            value={filterType || ''}
+            onChange={(e) => setFilterType(e.target.value || null)}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white"
+          >
+            <option value="">All Types</option>
+            {matterTypes?.map(type => (
+              <option key={type} value={type}>{type}</option>
+            ))}
+          </select>
+          {filterType && (
+            <button
+              onClick={() => setFilterType(null)}
+              className="text-gray-400 hover:text-gray-600"
+              title="Clear filter"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Summary Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -296,7 +335,7 @@ export default function Metrics() {
                 <tr key={m.model_name}>
                   <td className="px-6 py-4 font-medium">{m.model_name}</td>
                   <td className="px-6 py-4 text-gray-500">{m.usage_count}</td>
-                  <td className="px-6 py-4 text-gray-500">{m.avg_time.toFixed(1)}s</td>
+                  <td className="px-6 py-4 text-gray-500">{m.total_processing_time.toFixed(1)}s</td>
                 </tr>
               ))}
             </tbody>
