@@ -13,6 +13,7 @@ import Dashboard from './pages/Dashboard'
 import Documents from './pages/Documents'
 import DocumentViewer from './pages/DocumentViewer'
 import Models from './pages/Models'
+import ModelDetail from './pages/ModelDetail'
 import Metrics from './pages/Metrics'
 
 const navigation = [
@@ -74,6 +75,7 @@ function App() {
           <Route path="/documents" element={<Documents />} />
           <Route path="/documents/:id" element={<DocumentViewer />} />
           <Route path="/models" element={<Models />} />
+          <Route path="/models/:id" element={<ModelDetail />} />
           <Route path="/metrics" element={<Metrics />} />
         </Routes>
       </main>

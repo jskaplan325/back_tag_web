@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Box,
@@ -9,7 +10,8 @@ import {
   Loader2,
   Download,
   Clock,
-  AlertCircle
+  AlertCircle,
+  ChevronRight
 } from 'lucide-react'
 import clsx from 'clsx'
 import api from '../api'
@@ -146,38 +148,43 @@ function ModelCard({ model, onApprove }: { model: Model; onApprove: (id: string)
   })
 
   return (
-    <div className="rounded-lg bg-white p-6 shadow">
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
-          <div className={clsx(
-            'rounded-lg p-2',
-            model.type === 'semantic' && 'bg-blue-100',
-            model.type === 'vision' && 'bg-purple-100',
-            model.type === 'ocr' && 'bg-green-100'
-          )}>
-            <Box className={clsx(
-              'h-5 w-5',
-              model.type === 'semantic' && 'text-blue-600',
-              model.type === 'vision' && 'text-purple-600',
-              model.type === 'ocr' && 'text-green-600'
-            )} />
+    <div className="rounded-lg bg-white p-6 shadow hover:shadow-md transition-shadow">
+      <Link to={`/models/${model.id}`} className="block">
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-3">
+            <div className={clsx(
+              'rounded-lg p-2',
+              model.type === 'semantic' && 'bg-blue-100',
+              model.type === 'vision' && 'bg-purple-100',
+              model.type === 'ocr' && 'bg-green-100'
+            )}>
+              <Box className={clsx(
+                'h-5 w-5',
+                model.type === 'semantic' && 'text-blue-600',
+                model.type === 'vision' && 'text-purple-600',
+                model.type === 'ocr' && 'text-green-600'
+              )} />
+            </div>
+            <div>
+              <h3 className="font-medium">{model.name.split('/').pop()}</h3>
+              <p className="text-sm text-gray-500">{model.name.split('/')[0]}</p>
+            </div>
           </div>
-          <div>
-            <h3 className="font-medium">{model.name.split('/').pop()}</h3>
-            <p className="text-sm text-gray-500">{model.name.split('/')[0]}</p>
+          <div className="flex items-center gap-2">
+            <span className={clsx(
+              'px-2 py-1 rounded text-xs',
+              model.approved ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+            )}>
+              {model.approved ? 'Approved' : 'Pending'}
+            </span>
+            <ChevronRight className="h-4 w-4 text-gray-400" />
           </div>
         </div>
-        <span className={clsx(
-          'px-2 py-1 rounded text-xs',
-          model.approved ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-        )}>
-          {model.approved ? 'Approved' : 'Pending'}
-        </span>
-      </div>
 
-      {model.description && (
-        <p className="mt-3 text-sm text-gray-600 line-clamp-2">{model.description}</p>
-      )}
+        {model.description && (
+          <p className="mt-3 text-sm text-gray-600 line-clamp-2">{model.description}</p>
+        )}
+      </Link>
 
       <div className="mt-4 flex items-center gap-4 text-sm text-gray-500">
         {model.size_gb && (

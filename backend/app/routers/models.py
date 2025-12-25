@@ -2,9 +2,10 @@
 Models Router - Model registry with HuggingFace integration.
 """
 import uuid
+import re
 import httpx
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -14,6 +15,107 @@ from pydantic import BaseModel
 from ..database.db import get_db, Model, ModelUsage
 
 router = APIRouter()
+
+
+def parse_model_card(readme_content: str) -> Dict[str, str]:
+    """Parse a HuggingFace model card README into sections."""
+    sections = {}
+
+    # Remove YAML frontmatter
+    content = re.sub(r'^---\n.*?\n---\n', '', readme_content, flags=re.DOTALL)
+
+    # Split by markdown headers (## or #)
+    parts = re.split(r'\n(#{1,2}\s+[^\n]+)\n', content)
+
+    current_section = "overview"
+    current_content = []
+
+    for part in parts:
+        if re.match(r'^#{1,2}\s+', part):
+            # Save previous section
+            if current_content:
+                sections[current_section] = '\n'.join(current_content).strip()
+
+            # Start new section - normalize header name
+            header = re.sub(r'^#{1,2}\s+', '', part).strip().lower()
+            header = re.sub(r'[^a-z0-9\s]', '', header)
+            header = header.replace(' ', '_')
+            current_section = header
+            current_content = []
+        else:
+            current_content.append(part)
+
+    # Save last section
+    if current_content:
+        sections[current_section] = '\n'.join(current_content).strip()
+
+    return sections
+
+
+def extract_model_summary(sections: Dict[str, str]) -> Dict[str, Optional[str]]:
+    """Extract key information from parsed model card sections."""
+
+    # Executive summary - first meaningful paragraph from overview or description
+    executive_summary = None
+    for key in ['overview', 'model_description', 'description', '']:
+        if key in sections and sections[key]:
+            # Get first paragraph that's substantial
+            paragraphs = [p.strip() for p in sections[key].split('\n\n') if p.strip()]
+            for p in paragraphs:
+                if len(p) > 50 and not p.startswith('```'):
+                    executive_summary = p[:1000]
+                    break
+            if executive_summary:
+                break
+
+    # Intended uses
+    intended_uses = None
+    for key in ['intended_uses__limitations', 'intended_uses', 'uses', 'how_to_use']:
+        if key in sections:
+            intended_uses = sections[key][:2000]
+            break
+
+    # Limitations and bias (security relevant)
+    limitations = None
+    for key in ['limitations_and_bias', 'limitations', 'bias', 'risks_limitations_and_biases', 'ethical_considerations']:
+        if key in sections:
+            limitations = sections[key][:3000]
+            break
+
+    # Training data
+    training_data = None
+    for key in ['training_data', 'training', 'data', 'dataset']:
+        if key in sections:
+            training_data = sections[key][:2000]
+            break
+
+    # Training procedure (for understanding model behavior)
+    training_procedure = None
+    for key in ['training_procedure', 'training_details', 'training_setup']:
+        if key in sections:
+            training_procedure = sections[key][:2000]
+            break
+
+    return {
+        'executive_summary': executive_summary,
+        'intended_uses': intended_uses,
+        'limitations': limitations,
+        'training_data': training_data,
+        'training_procedure': training_procedure,
+    }
+
+
+async def fetch_model_card(model_name: str) -> Optional[str]:
+    """Fetch the full README/model card from HuggingFace."""
+    url = f"https://huggingface.co/{model_name}/raw/main/README.md"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, timeout=10.0, follow_redirects=True)
+            if response.status_code == 200:
+                return response.text
+    except Exception as e:
+        print(f"Failed to fetch model card for {model_name}: {e}")
+    return None
 
 
 class ModelCreate(BaseModel):
@@ -167,6 +269,97 @@ async def get_model(model_id: str, db: Session = Depends(get_db)):
 
     return ModelResponse(
         **{**model.__dict__, "usage_count": usage_count}
+    )
+
+
+class ModelCardDetail(BaseModel):
+    """Detailed model card information."""
+    id: str
+    name: str
+    type: str
+    huggingface_url: Optional[str]
+    size_gb: Optional[float]
+    downloads: Optional[int]
+    license: Optional[str]
+    last_updated: Optional[datetime]
+    approved: bool
+    approved_by: Optional[str]
+    approved_at: Optional[datetime]
+    created_at: datetime
+    usage_count: int = 0
+
+    # Detailed model card sections
+    executive_summary: Optional[str] = None
+    intended_uses: Optional[str] = None
+    limitations: Optional[str] = None
+    training_data: Optional[str] = None
+    training_procedure: Optional[str] = None
+
+    # Additional HuggingFace metadata
+    tags: List[str] = []
+    pipeline_tag: Optional[str] = None
+    library_name: Optional[str] = None
+    likes: Optional[int] = None
+
+
+@router.get("/{model_id}/card", response_model=ModelCardDetail)
+async def get_model_card(model_id: str, db: Session = Depends(get_db)):
+    """Get detailed model card with parsed sections."""
+    model = db.query(Model).filter(Model.id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    usage_count = db.query(ModelUsage).filter(ModelUsage.model_id == model_id).count()
+
+    # Fetch full model card from HuggingFace
+    readme = await fetch_model_card(model.name)
+    parsed_sections = {}
+    if readme:
+        sections = parse_model_card(readme)
+        parsed_sections = extract_model_summary(sections)
+
+    # Fetch additional HuggingFace metadata
+    tags = []
+    pipeline_tag = None
+    library_name = None
+    likes = None
+
+    try:
+        async with httpx.AsyncClient() as client:
+            url = f"https://huggingface.co/api/models/{model.name}"
+            response = await client.get(url, timeout=10.0)
+            if response.status_code == 200:
+                data = response.json()
+                tags = data.get("tags", [])
+                pipeline_tag = data.get("pipeline_tag")
+                library_name = data.get("library_name")
+                likes = data.get("likes")
+    except Exception:
+        pass
+
+    return ModelCardDetail(
+        id=model.id,
+        name=model.name,
+        type=model.type,
+        huggingface_url=model.huggingface_url,
+        size_gb=model.size_gb,
+        downloads=model.downloads,
+        license=model.license,
+        last_updated=model.last_updated,
+        approved=model.approved,
+        approved_by=model.approved_by,
+        approved_at=model.approved_at,
+        created_at=model.created_at,
+        usage_count=usage_count,
+        executive_summary=parsed_sections.get('executive_summary'),
+        intended_uses=parsed_sections.get('intended_uses'),
+        limitations=parsed_sections.get('limitations'),
+        training_data=parsed_sections.get('training_data'),
+        training_procedure=parsed_sections.get('training_procedure'),
+        tags=tags,
+        pipeline_tag=pipeline_tag,
+        library_name=library_name,
+        likes=likes,
     )
 
 
