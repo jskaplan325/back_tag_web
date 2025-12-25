@@ -265,6 +265,7 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
   const [typeOverrides, setTypeOverrides] = useState<Record<string, string>>({})
   const [editingType, setEditingType] = useState<string | null>(null)
   const [importResult, setImportResult] = useState<BulkImportResult | null>(null)
+  const [showReimportWarning, setShowReimportWarning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
@@ -342,12 +343,27 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
     .filter(f => selections[f.path])
     .reduce((sum, f) => sum + f.document_count, 0) || 0
 
+  // Count selected folders that are already imported (reimports)
+  const selectedReimports = scanResult?.subfolders
+    .filter(f => selections[f.path] && f.already_imported) || []
+  const reimportCount = selectedReimports.length
+  const reimportDocCount = selectedReimports.reduce((sum, f) => sum + f.document_count, 0)
+
   // Get effective type (override or inferred)
   const getEffectiveType = (folder: SubfolderInfo) =>
     typeOverrides[folder.path] || folder.matter_type
 
   // Available types from taxonomy + fallback
   const availableTypes = areasOfLaw?.map(a => a.name) || Object.keys(matterTypeColors)
+
+  // Handle import click - check for reimports first
+  const handleImportClick = () => {
+    if (reimportCount > 0) {
+      setShowReimportWarning(true)
+    } else {
+      importMutation.mutate()
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 overflow-auto py-8">
@@ -444,7 +460,7 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
                               type="checkbox"
                               checked={selections[folder.path] || false}
                               onChange={() => toggleSelection(folder.path)}
-                              disabled={folder.already_imported}
+                              disabled={folder.document_count === 0}
                               className="rounded border-gray-300"
                             />
                           </td>
@@ -460,7 +476,7 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
                             </div>
                           </td>
                           <td className="p-2">
-                            {editingType === folder.path && !folder.already_imported ? (
+                            {editingType === folder.path ? (
                               <select
                                 value={getEffectiveType(folder)}
                                 onChange={(e) => {
@@ -480,19 +496,16 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
                               </select>
                             ) : (
                               <button
-                                onClick={() => !folder.already_imported && setEditingType(folder.path)}
-                                disabled={folder.already_imported}
+                                onClick={() => setEditingType(folder.path)}
                                 className={clsx(
-                                  "px-2 py-0.5 rounded text-xs transition-all",
-                                  folder.already_imported && "opacity-50 cursor-not-allowed",
-                                  !folder.already_imported && "hover:ring-2 hover:ring-blue-300 cursor-pointer",
+                                  "px-2 py-0.5 rounded text-xs transition-all hover:ring-2 hover:ring-blue-300 cursor-pointer",
                                   typeOverrides[folder.path] && "ring-2 ring-blue-400"
                                 )}
                                 style={{
                                   backgroundColor: `${matterTypeColors[getEffectiveType(folder)] || matterTypeColors['General']}20`,
                                   color: matterTypeColors[getEffectiveType(folder)] || matterTypeColors['General']
                                 }}
-                                title={folder.already_imported ? "Already imported" : "Click to change type"}
+                                title="Click to change type"
                               >
                                 {getEffectiveType(folder)}
                                 {typeOverrides[folder.path] && " *"}
@@ -524,20 +537,28 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
                 </div>
 
                 <div className="mt-4 flex justify-between items-center">
-                  <span className="text-sm text-gray-500">
-                    {selectedDocCount} documents to import
-                  </span>
+                  <div className="text-sm text-gray-500">
+                    <span>{selectedDocCount} documents to import</span>
+                    {reimportCount > 0 && (
+                      <span className="ml-2 text-amber-600">
+                        ({reimportCount} already imported)
+                      </span>
+                    )}
+                  </div>
                   <button
-                    onClick={() => importMutation.mutate()}
+                    onClick={handleImportClick}
                     disabled={importMutation.isPending || selectedCount === 0}
-                    className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
+                    className={clsx(
+                      "flex items-center gap-2 rounded-lg px-4 py-2 text-white disabled:opacity-50",
+                      reimportCount > 0 ? "bg-amber-600 hover:bg-amber-700" : "bg-blue-600 hover:bg-blue-700"
+                    )}
                   >
                     {importMutation.isPending ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
                       <Plus className="h-4 w-4" />
                     )}
-                    Import {selectedCount} Matters
+                    {reimportCount > 0 ? `Import (${reimportCount} reimport)` : `Import ${selectedCount} Matters`}
                   </button>
                 </div>
               </div>
@@ -571,6 +592,64 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
           </div>
         )}
       </div>
+
+      {/* Reimport Warning Modal */}
+      {showReimportWarning && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl mx-4">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="rounded-full bg-amber-100 p-2">
+                <AlertTriangle className="h-6 w-6 text-amber-600" />
+              </div>
+              <h2 className="text-xl font-semibold">Re-import Matters?</h2>
+            </div>
+
+            <p className="text-gray-600 mb-4">
+              You've selected <strong>{reimportCount}</strong> matter{reimportCount > 1 ? 's' : ''} that {reimportCount > 1 ? 'have' : 'has'} already been imported:
+            </p>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 max-h-32 overflow-auto">
+              <ul className="text-sm text-amber-800 space-y-1">
+                {selectedReimports.map(f => (
+                  <li key={f.path} className="flex justify-between">
+                    <span>{f.name}</span>
+                    <span className="text-amber-600">{f.document_count} docs</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <p className="text-sm text-gray-500 mb-4">
+              Re-importing will create duplicate matters. Use this if you've updated the taxonomy
+              and want to reprocess documents with new tags.
+            </p>
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowReimportWarning(false)}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowReimportWarning(false)
+                  importMutation.mutate()
+                }}
+                disabled={importMutation.isPending}
+                className="flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {importMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Plus className="h-4 w-4" />
+                )}
+                Re-import {reimportCount} Matter{reimportCount > 1 ? 's' : ''}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
