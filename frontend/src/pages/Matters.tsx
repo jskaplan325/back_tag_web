@@ -500,16 +500,24 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
                                 onClick={() => setEditingType(folder.path)}
                                 className={clsx(
                                   "px-2 py-0.5 rounded text-xs transition-all hover:ring-2 hover:ring-blue-300 cursor-pointer",
-                                  typeOverrides[folder.path] && "ring-2 ring-blue-400"
+                                  typeOverrides[folder.path] && "ring-2 ring-blue-400",
+                                  getEffectiveType(folder) === 'TBD' && "border border-dashed border-gray-400"
                                 )}
                                 style={{
-                                  backgroundColor: `${matterTypeColors[getEffectiveType(folder)] || '#6b7280'}20`,
-                                  color: matterTypeColors[getEffectiveType(folder)] || '#6b7280'
+                                  backgroundColor: getEffectiveType(folder) === 'TBD'
+                                    ? '#f3f4f6'
+                                    : `${matterTypeColors[getEffectiveType(folder)] || '#6b7280'}20`,
+                                  color: getEffectiveType(folder) === 'TBD'
+                                    ? '#9ca3af'
+                                    : matterTypeColors[getEffectiveType(folder)] || '#6b7280'
                                 }}
-                                title="Click to change type"
+                                title={getEffectiveType(folder) === 'TBD'
+                                  ? "Click to set type manually. Future: will be imported from MatterDB"
+                                  : "Click to change type"
+                                }
                               >
                                 {getEffectiveType(folder)}
-                                {typeOverrides[folder.path] && " *"}
+                                {typeOverrides[folder.path] && " ✓"}
                               </button>
                             )}
                           </td>

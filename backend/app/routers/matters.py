@@ -363,32 +363,21 @@ async def bulk_import(
 
 
 def infer_matter_type(folder_name: str) -> str:
-    """Infer matter type from folder name. Returns taxonomy Area of Law names."""
-    name_lower = folder_name.lower()
+    """
+    Infer matter type from folder name.
 
-    # Map folder name patterns to taxonomy Area of Law names
-    if 'fund' in name_lower:
-        return 'Investment Funds'
-    elif 'm_and_a' in name_lower or 'merger' in name_lower or 'acquisition' in name_lower or 'ma_' in name_lower or 'corporate' in name_lower:
-        return 'M&A / Corporate'
-    elif 'levfin' in name_lower or 'leverage' in name_lower or 'lev_fin' in name_lower or 'credit' in name_lower:
-        return 'Leveraged Finance'
-    elif 'securit' in name_lower or 'capital' in name_lower or 'ipo' in name_lower or 'offering' in name_lower:
-        return 'Securities / Capital Markets'
-    elif 'contract' in name_lower or 'commercial' in name_lower or 'agreement' in name_lower:
-        return 'Contracts / Commercial'
-    elif 'real_estate' in name_lower or 'realestate' in name_lower or 'property' in name_lower:
-        return 'Real Estate'
-    elif 'ip' in name_lower or 'intellectual' in name_lower or 'patent' in name_lower:
-        return 'Intellectual Property'
-    elif 'employ' in name_lower or 'labor' in name_lower:
-        return 'Employment'
-    elif 'tax' in name_lower:
-        return 'Tax'
-    elif 'litigation' in name_lower or 'dispute' in name_lower:
-        return 'Litigation'
-    else:
-        return 'Contracts / Commercial'  # Default to general contracts
+    TODO: This is a placeholder. In the future, this will be populated from
+    an internal MatterDB that maps matter IDs to their Area of Law.
+
+    For now, returns 'TBD' since matter names are typically numeric IDs
+    like "Matter3323242" that don't indicate the practice area.
+    """
+    # Future: Query MatterDB to get the actual Area of Law for this matter ID
+    # matter_info = matter_db.lookup(folder_name)
+    # if matter_info:
+    #     return matter_info.area_of_law
+
+    return 'TBD'
 
 
 def import_matter_folder(db: Session, folder_path: Path, type_override: Optional[str] = None) -> tuple[Optional[Matter], int]:
