@@ -233,10 +233,15 @@ export default function Models() {
   const [filter, setFilter] = useState<'all' | 'approved' | 'pending'>('all')
   const queryClient = useQueryClient()
 
-  const { data: models, isLoading } = useQuery<Model[]>({
+  const { data: models, isLoading, error } = useQuery<Model[]>({
     queryKey: ['models'],
     queryFn: () => api.get('/api/models').then(r => r.data),
   })
+
+  // Debug: log any errors
+  if (error) {
+    console.error('Failed to fetch models:', error)
+  }
 
   const approveMutation = useMutation({
     mutationFn: (id: string) => api.patch(`/api/models/${id}`, { approved: true }),
@@ -285,6 +290,12 @@ export default function Models() {
       {isLoading ? (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+        </div>
+      ) : error ? (
+        <div className="rounded-lg bg-red-50 border border-red-200 p-6 text-center">
+          <AlertCircle className="mx-auto h-8 w-8 text-red-500" />
+          <h3 className="mt-2 font-medium text-red-800">Failed to load models</h3>
+          <p className="mt-1 text-sm text-red-600">Make sure the backend is running on port 8000</p>
         </div>
       ) : filteredModels && filteredModels.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

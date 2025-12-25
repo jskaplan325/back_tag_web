@@ -4,7 +4,8 @@ import {
   FileText,
   Box,
   BarChart3,
-  Upload
+  Upload,
+  Scale
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -15,10 +16,13 @@ import DocumentViewer from './pages/DocumentViewer'
 import Models from './pages/Models'
 import ModelDetail from './pages/ModelDetail'
 import Metrics from './pages/Metrics'
+import Taxonomy from './pages/Taxonomy'
+import TaxonomyDetail from './pages/TaxonomyDetail'
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Documents', href: '/documents', icon: FileText },
+  { name: 'Taxonomy', href: '/taxonomy', icon: Scale },
   { name: 'Models', href: '/models', icon: Box },
   { name: 'Metrics', href: '/metrics', icon: BarChart3 },
 ]
@@ -74,6 +78,8 @@ function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/documents" element={<Documents />} />
           <Route path="/documents/:id" element={<DocumentViewer />} />
+          <Route path="/taxonomy" element={<Taxonomy />} />
+          <Route path="/taxonomy/:id" element={<TaxonomyDetail />} />
           <Route path="/models" element={<Models />} />
           <Route path="/models/:id" element={<ModelDetail />} />
           <Route path="/metrics" element={<Metrics />} />

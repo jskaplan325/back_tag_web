@@ -133,6 +133,49 @@ class APICost(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class AreaOfLaw(Base):
+    """Area of Law for taxonomy organization."""
+    __tablename__ = "areas_of_law"
+
+    id = Column(String(36), primary_key=True)
+    name = Column(String(100), nullable=False, unique=True)
+    description = Column(Text, nullable=True)
+    color = Column(String(20), default="#3b82f6")  # Tailwind blue-500
+    icon = Column(String(50), default="Scale")  # Lucide icon name
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    tags = relationship("Tag", back_populates="area_of_law", cascade="all, delete-orphan")
+
+
+class Tag(Base):
+    """Tag definition within an Area of Law."""
+    __tablename__ = "tags"
+
+    id = Column(String(36), primary_key=True)
+    area_of_law_id = Column(String(36), ForeignKey("areas_of_law.id"), nullable=False)
+    name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    patterns = Column(JSON, default=list)  # List of regex patterns
+    semantic_examples = Column(JSON, default=list)  # List of example phrases
+    threshold = Column(Float, default=0.45)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    area_of_law = relationship("AreaOfLaw", back_populates="tags")
+
+
+class TagUsage(Base):
+    """Track tag detection in documents."""
+    __tablename__ = "tag_usages"
+
+    id = Column(String(36), primary_key=True)
+    tag_id = Column(String(36), ForeignKey("tags.id"), nullable=False)
+    result_id = Column(String(36), ForeignKey("results.id"), nullable=False)
+    confidence = Column(Float)
+    detected_at = Column(DateTime, default=datetime.utcnow)
+
+
 def init_db():
     """Initialize database tables."""
     Base.metadata.create_all(bind=engine)
