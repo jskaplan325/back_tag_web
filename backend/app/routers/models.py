@@ -231,6 +231,75 @@ async def register_model(
     )
 
 
+class UnregisteredModel(BaseModel):
+    name: str
+    type: str
+    usage_count: int
+    first_seen: Optional[datetime]
+
+
+@router.get("/check/unregistered", response_model=List[UnregisteredModel])
+async def check_unregistered_models(db: Session = Depends(get_db)):
+    """
+    Check for models used in processing results that aren't in the registry.
+    This helps identify models that need to be formally added and approved.
+    """
+    from ..database.db import Result
+
+    # Get all registered model names
+    registered = {m.name for m in db.query(Model.name).all()}
+
+    # Find model names used in results
+    results = db.query(Result).all()
+
+    unregistered = {}
+    for result in results:
+        # Check semantic model
+        if result.semantic_model and result.semantic_model not in registered:
+            if result.semantic_model not in unregistered:
+                unregistered[result.semantic_model] = {
+                    'type': 'semantic',
+                    'count': 0,
+                    'first_seen': result.processed_at
+                }
+            unregistered[result.semantic_model]['count'] += 1
+            if result.processed_at < unregistered[result.semantic_model]['first_seen']:
+                unregistered[result.semantic_model]['first_seen'] = result.processed_at
+
+        # Check vision model
+        if result.vision_model and result.vision_model not in registered:
+            if result.vision_model not in unregistered:
+                unregistered[result.vision_model] = {
+                    'type': 'vision',
+                    'count': 0,
+                    'first_seen': result.processed_at
+                }
+            unregistered[result.vision_model]['count'] += 1
+            if result.processed_at < unregistered[result.vision_model]['first_seen']:
+                unregistered[result.vision_model]['first_seen'] = result.processed_at
+
+    return [
+        UnregisteredModel(
+            name=name,
+            type=info['type'],
+            usage_count=info['count'],
+            first_seen=info['first_seen']
+        )
+        for name, info in unregistered.items()
+    ]
+
+
+@router.post("/cache/clear")
+async def clear_tagger_cache():
+    """Clear the fast tagger's cached model and taxonomy embeddings."""
+    try:
+        from ..services.fast_tagger import clear_cache
+        clear_cache()
+        return {"message": "Tagger cache cleared", "status": "success"}
+    except Exception as e:
+        return {"message": f"Failed to clear cache: {str(e)}", "status": "error"}
+
+
 @router.get("", response_model=List[ModelResponse])
 async def list_models(
     type: Optional[str] = None,

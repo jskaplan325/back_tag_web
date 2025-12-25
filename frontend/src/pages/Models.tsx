@@ -36,6 +36,13 @@ interface ModelUsageStats {
   avg_processing_time: number
 }
 
+interface UnregisteredModel {
+  name: string
+  type: string
+  usage_count: number
+  first_seen: string
+}
+
 function AddModelModal({ onClose }: { onClose: () => void }) {
   const [modelName, setModelName] = useState('')
   const [modelType, setModelType] = useState('semantic')
@@ -231,11 +238,17 @@ function ModelCard({ model, onApprove }: { model: Model; onApprove: (id: string)
 export default function Models() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [filter, setFilter] = useState<'all' | 'approved' | 'pending'>('all')
+  const [addingModel, setAddingModel] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
   const { data: models, isLoading, error } = useQuery<Model[]>({
     queryKey: ['models'],
     queryFn: () => api.get('/api/models').then(r => r.data),
+  })
+
+  const { data: unregistered } = useQuery<UnregisteredModel[]>({
+    queryKey: ['models', 'unregistered'],
+    queryFn: () => api.get('/api/models/check/unregistered').then(r => r.data),
   })
 
   // Debug: log any errors
@@ -247,6 +260,16 @@ export default function Models() {
     mutationFn: (id: string) => api.patch(`/api/models/${id}`, { approved: true }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['models'] })
+    },
+  })
+
+  const addUnregisteredMutation = useMutation({
+    mutationFn: ({ name, type }: { name: string; type: string }) =>
+      api.post('/api/models', { name, type }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['models'] })
+      queryClient.invalidateQueries({ queryKey: ['models', 'unregistered'] })
+      setAddingModel(null)
     },
   })
 
@@ -268,6 +291,50 @@ export default function Models() {
           Add Model
         </button>
       </div>
+
+      {/* Unregistered Models Warning */}
+      {unregistered && unregistered.length > 0 && (
+        <div className="mb-6 rounded-lg bg-amber-50 border border-amber-200 p-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5" />
+            <div className="flex-1">
+              <h3 className="font-medium text-amber-800">
+                {unregistered.length} Unregistered Model{unregistered.length > 1 ? 's' : ''} Detected
+              </h3>
+              <p className="text-sm text-amber-700 mt-1">
+                The following models are being used in document processing but haven't been formally registered:
+              </p>
+              <div className="mt-3 space-y-2">
+                {unregistered.map((model) => (
+                  <div key={model.name} className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-amber-200">
+                    <div>
+                      <span className="font-medium text-gray-900">{model.name}</span>
+                      <span className="ml-2 text-xs text-gray-500">
+                        ({model.type} • {model.usage_count} uses)
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setAddingModel(model.name)
+                        addUnregisteredMutation.mutate({ name: model.name, type: model.type })
+                      }}
+                      disabled={addingModel === model.name}
+                      className="flex items-center gap-1 text-sm text-amber-700 hover:text-amber-900 disabled:opacity-50"
+                    >
+                      {addingModel === model.name ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Plus className="h-4 w-4" />
+                      )}
+                      Add to Registry
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="mb-6 flex gap-2">

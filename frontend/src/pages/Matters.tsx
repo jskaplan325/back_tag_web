@@ -40,6 +40,12 @@ interface SubfolderInfo {
   already_imported: boolean
 }
 
+interface AreaOfLaw {
+  id: string
+  name: string
+  color: string
+}
+
 interface ScanResult {
   folder_path: string
   subfolders: SubfolderInfo[]
@@ -256,9 +262,17 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
   const [folderPath, setFolderPath] = useState('/Users/jaredkaplan/Projects/legal_dataset/legal_test_matters')
   const [scanResult, setScanResult] = useState<ScanResult | null>(null)
   const [selections, setSelections] = useState<Record<string, boolean>>({})
+  const [typeOverrides, setTypeOverrides] = useState<Record<string, string>>({})
+  const [editingType, setEditingType] = useState<string | null>(null)
   const [importResult, setImportResult] = useState<BulkImportResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const queryClient = useQueryClient()
+
+  // Fetch Areas of Law for type dropdown
+  const { data: areasOfLaw } = useQuery<AreaOfLaw[]>({
+    queryKey: ['taxonomy'],
+    queryFn: () => api.get('/api/taxonomy').then(r => r.data),
+  })
 
   const scanMutation = useMutation({
     mutationFn: async () => {
@@ -286,7 +300,8 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
         .map(([path]) => path)
       return api.post('/api/matters/bulk-import', {
         folder_path: folderPath,
-        selected_folders: selectedFolders
+        selected_folders: selectedFolders,
+        type_overrides: typeOverrides
       })
     },
     onSuccess: (response) => {
@@ -326,6 +341,13 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
   const selectedDocCount = scanResult?.subfolders
     .filter(f => selections[f.path])
     .reduce((sum, f) => sum + f.document_count, 0) || 0
+
+  // Get effective type (override or inferred)
+  const getEffectiveType = (folder: SubfolderInfo) =>
+    typeOverrides[folder.path] || folder.matter_type
+
+  // Available types from taxonomy + fallback
+  const availableTypes = areasOfLaw?.map(a => a.name) || Object.keys(matterTypeColors)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 overflow-auto py-8">
@@ -399,7 +421,10 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
                       <tr>
                         <th className="w-10 p-2"></th>
                         <th className="text-left p-2 font-medium">Folder Name</th>
-                        <th className="text-left p-2 font-medium">Type</th>
+                        <th className="text-left p-2 font-medium">
+                          Type
+                          <span className="font-normal text-xs text-gray-400 ml-1">(click to edit)</span>
+                        </th>
                         <th className="text-right p-2 font-medium">Documents</th>
                         <th className="text-left p-2 font-medium">Status</th>
                       </tr>
@@ -435,18 +460,44 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
                             </div>
                           </td>
                           <td className="p-2">
-                            <span
-                              className={clsx(
-                                "px-2 py-0.5 rounded text-xs",
-                                folder.already_imported && "opacity-50"
-                              )}
-                              style={{
-                                backgroundColor: `${matterTypeColors[folder.matter_type] || matterTypeColors['General']}20`,
-                                color: matterTypeColors[folder.matter_type] || matterTypeColors['General']
-                              }}
-                            >
-                              {folder.matter_type}
-                            </span>
+                            {editingType === folder.path && !folder.already_imported ? (
+                              <select
+                                value={getEffectiveType(folder)}
+                                onChange={(e) => {
+                                  setTypeOverrides(prev => ({
+                                    ...prev,
+                                    [folder.path]: e.target.value
+                                  }))
+                                  setEditingType(null)
+                                }}
+                                onBlur={() => setEditingType(null)}
+                                autoFocus
+                                className="text-xs rounded border border-blue-300 px-1 py-0.5 bg-white"
+                              >
+                                {availableTypes.map(type => (
+                                  <option key={type} value={type}>{type}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              <button
+                                onClick={() => !folder.already_imported && setEditingType(folder.path)}
+                                disabled={folder.already_imported}
+                                className={clsx(
+                                  "px-2 py-0.5 rounded text-xs transition-all",
+                                  folder.already_imported && "opacity-50 cursor-not-allowed",
+                                  !folder.already_imported && "hover:ring-2 hover:ring-blue-300 cursor-pointer",
+                                  typeOverrides[folder.path] && "ring-2 ring-blue-400"
+                                )}
+                                style={{
+                                  backgroundColor: `${matterTypeColors[getEffectiveType(folder)] || matterTypeColors['General']}20`,
+                                  color: matterTypeColors[getEffectiveType(folder)] || matterTypeColors['General']
+                                }}
+                                title={folder.already_imported ? "Already imported" : "Click to change type"}
+                              >
+                                {getEffectiveType(folder)}
+                                {typeOverrides[folder.path] && " *"}
+                              </button>
+                            )}
                           </td>
                           <td className={clsx(
                             "p-2 text-right",

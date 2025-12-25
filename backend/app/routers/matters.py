@@ -75,6 +75,7 @@ class MatterDetailResponse(BaseModel):
 class BulkImportRequest(BaseModel):
     folder_path: str
     selected_folders: Optional[List[str]] = None  # If None, import all non-empty folders
+    type_overrides: Optional[dict] = None  # Map of folder_path -> matter_type override
 
 
 class BulkImportResult(BaseModel):
@@ -333,6 +334,9 @@ async def bulk_import(
     total_documents = 0
     errors = []
 
+    # Get type overrides
+    type_overrides = request.type_overrides or {}
+
     for item in sorted(folder_path.iterdir()):
         if item.is_dir() and not item.name.startswith('.'):
             # Skip if we have a selection list and this folder isn't in it
@@ -340,7 +344,9 @@ async def bulk_import(
                 continue
 
             try:
-                matter, doc_count = import_matter_folder(db, item)
+                # Check for type override
+                override_type = type_overrides.get(str(item))
+                matter, doc_count = import_matter_folder(db, item, override_type)
                 if matter:
                     matters_created.append(matter)
                     total_documents += doc_count
@@ -379,7 +385,7 @@ def infer_matter_type(folder_name: str) -> str:
         return 'General'
 
 
-def import_matter_folder(db: Session, folder_path: Path) -> tuple[Optional[Matter], int]:
+def import_matter_folder(db: Session, folder_path: Path, type_override: Optional[str] = None) -> tuple[Optional[Matter], int]:
     """Import a single folder as a matter with its documents."""
     # Get list of supported files
     files = [f for f in folder_path.iterdir()
@@ -390,7 +396,8 @@ def import_matter_folder(db: Session, folder_path: Path) -> tuple[Optional[Matte
 
     # Create matter
     matter_id = str(uuid.uuid4())
-    matter_type = infer_matter_type(folder_path.name)
+    # Use override if provided, otherwise infer from folder name
+    matter_type = type_override if type_override else infer_matter_type(folder_path.name)
 
     matter = Matter(
         id=matter_id,

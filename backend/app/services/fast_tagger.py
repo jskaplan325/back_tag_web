@@ -1,11 +1,12 @@
 """
 Fast Text-Only Document Tagger
 
-Lightweight tagger that extracts text and runs semantic matching directly,
+Lightweight tagger that extracts text and runs hybrid pattern + semantic matching,
 bypassing PDF-to-image conversion and vision models.
 
 Performance: ~2-3 seconds per document vs 10+ seconds with full pipeline.
 """
+import re
 import time
 import numpy as np
 from pathlib import Path
@@ -106,6 +107,56 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
 
 
+def count_pattern_matches(text: str, patterns: List[str]) -> int:
+    """Count how many pattern matches are found in text."""
+    if not patterns:
+        return 0
+
+    text_lower = text.lower()
+    total_matches = 0
+
+    for pattern in patterns:
+        try:
+            matches = re.findall(pattern, text_lower, re.IGNORECASE)
+            total_matches += len(matches)
+        except re.error:
+            # Invalid regex, try as literal
+            total_matches += text_lower.count(pattern.lower())
+
+    return total_matches
+
+
+def compute_hybrid_confidence(
+    semantic_score: float,
+    pattern_matches: int,
+    semantic_weight: float = 0.6,
+    pattern_boost: float = 0.15,
+    max_pattern_boost: float = 0.35
+) -> float:
+    """
+    Compute hybrid confidence from semantic similarity and pattern matches.
+
+    - Base: semantic_score * semantic_weight
+    - Pattern boost: min(pattern_matches * pattern_boost, max_pattern_boost)
+    - Final: normalized to 0-1 range
+
+    This produces scores in the 0.7-0.95 range for good matches.
+    """
+    # Base semantic contribution (scaled up from typical 0.4-0.7 range)
+    # Map 0.4-0.7 semantic to 0.5-0.8 base
+    scaled_semantic = 0.5 + (semantic_score - 0.4) * (0.3 / 0.3)
+    scaled_semantic = max(0.3, min(0.85, scaled_semantic))
+
+    # Pattern boost (capped)
+    pattern_contribution = min(pattern_matches * pattern_boost, max_pattern_boost)
+
+    # Combined score
+    final_score = scaled_semantic + pattern_contribution
+
+    # Ensure in valid range
+    return min(0.98, max(0.0, final_score))
+
+
 def tag_text(
     text: str,
     model: SentenceTransformer,
@@ -115,7 +166,7 @@ def tag_text(
     chunk_size: int = 200,
     chunk_overlap: int = 50
 ) -> List[Dict[str, Any]]:
-    """Tag text using semantic similarity matching."""
+    """Tag text using hybrid pattern + semantic similarity matching."""
 
     # Chunk text
     words = text.split()
@@ -139,13 +190,27 @@ def tag_text(
         max_sim = max(similarities)
         best_chunk_idx = similarities.index(max_sim)
 
-        if max_sim >= threshold:
+        # Get pattern matches
+        patterns = tag_metadata.get(tag_name, {}).get('patterns', [])
+        pattern_matches = count_pattern_matches(text, patterns)
+
+        # Compute hybrid confidence
+        hybrid_confidence = compute_hybrid_confidence(max_sim, pattern_matches)
+
+        # Use tag-specific threshold or default
+        tag_threshold = tag_metadata.get(tag_name, {}).get('threshold', threshold)
+
+        # Accept if semantic passes threshold OR we have strong pattern matches
+        if max_sim >= tag_threshold or pattern_matches >= 3:
             matches.append({
                 'name': tag_name,
                 'tag_name': tag_name,  # Alias for compatibility
+                'tag': tag_name,  # Another alias
                 'area': tag_metadata.get(tag_name, {}).get('area', 'Unknown'),
-                'confidence': float(max_sim),
-                'score': float(max_sim),  # Alias
+                'confidence': round(hybrid_confidence, 3),
+                'score': round(hybrid_confidence, 3),  # Alias
+                'semantic_similarity': round(max_sim, 3),
+                'pattern_matches': pattern_matches,
                 'evidence_chunk': chunks[best_chunk_idx][:300]
             })
 
