@@ -61,6 +61,10 @@ class Document(Base):
     status = Column(String(50), default="uploaded")  # uploaded, processing, completed, failed
     error_message = Column(Text, nullable=True)
 
+    # Pipeline recommendation (from document analyzer)
+    recommended_pipeline = Column(String(50), nullable=True)  # fast, zone, vision, ocr
+    analysis_metadata = Column(JSON, nullable=True)  # Full analysis results
+
     # Relationships
     matter = relationship("Matter", back_populates="documents")
     results = relationship("Result", back_populates="document", cascade="all, delete-orphan")

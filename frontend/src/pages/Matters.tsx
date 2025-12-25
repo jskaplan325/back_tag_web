@@ -774,7 +774,7 @@ function MatterTypeCard({
 export default function Matters() {
   const [showImportModal, setShowImportModal] = useState(false)
   const [processAllTarget, setProcessAllTarget] = useState<{ type: string | null, count: number } | null>(null)
-  const [processingMode, setProcessingMode] = useState<'fast' | 'smart'>('fast')
+  const [processingMode, setProcessingMode] = useState<'fast' | 'auto' | 'smart'>('fast')
   const [showStatusPanel, setShowStatusPanel] = useState(true)  // Processing status panel
   const queryClient = useQueryClient()
 
@@ -794,7 +794,8 @@ export default function Matters() {
         matter_type: matterType,
         only_pending: true,
         fast_mode: processingMode === 'fast',
-        smart_mode: processingMode === 'smart'
+        smart_mode: processingMode === 'smart',
+        auto_mode: processingMode === 'auto'
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['matter-stats'] })
@@ -808,7 +809,8 @@ export default function Matters() {
         matter_type: matterType,
         only_pending: false,
         fast_mode: processingMode === 'fast',
-        smart_mode: processingMode === 'smart'
+        smart_mode: processingMode === 'smart',
+        auto_mode: processingMode === 'auto'
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['matter-stats'] })
@@ -851,9 +853,22 @@ export default function Matters() {
                   ? 'bg-white shadow text-gray-900'
                   : 'text-gray-600 hover:text-gray-900'
               )}
+              title="Fast text-only semantic tagging"
             >
               Fast
-              <span className="text-xs text-gray-400 ml-1">(~3s)</span>
+            </button>
+            <button
+              onClick={() => setProcessingMode('auto')}
+              className={clsx(
+                'px-3 py-1.5 rounded text-sm font-medium transition-colors',
+                processingMode === 'auto'
+                  ? 'bg-white shadow text-blue-700'
+                  : 'text-gray-600 hover:text-gray-900'
+              )}
+              title="Auto-select pipeline based on document analysis (OCR, vision, zone, or fast)"
+            >
+              Auto
+              <span className="text-xs text-gray-400 ml-1">✨</span>
             </button>
             <button
               onClick={() => setProcessingMode('smart')}

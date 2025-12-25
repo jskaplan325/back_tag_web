@@ -53,6 +53,7 @@ class DocumentInMatter(BaseModel):
     status: str
     uploaded_at: datetime
     file_size_bytes: Optional[int]
+    recommended_pipeline: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -455,6 +456,20 @@ def import_matter_folder(db: Session, folder_path: Path, type_override: Optional
             except Exception:
                 pass
 
+        # Analyze document for pipeline recommendation
+        from ..services.document_analyzer import analyze_document, analysis_to_dict
+        try:
+            analysis = analyze_document(str(dest_path))
+            recommended_pipeline = analysis.recommended_pipeline
+            analysis_metadata = analysis_to_dict(analysis)
+            # Update word count from analysis if available
+            if analysis.word_count > 0:
+                word_count = analysis.word_count
+        except Exception as e:
+            # If analysis fails, default to fast pipeline
+            recommended_pipeline = "fast"
+            analysis_metadata = {"error": str(e)}
+
         # Create document record
         document = Document(
             id=doc_id,
@@ -463,7 +478,9 @@ def import_matter_folder(db: Session, folder_path: Path, type_override: Optional
             filepath=str(dest_path),
             file_size_bytes=file_size,
             word_count=word_count,
-            status="uploaded"
+            status="uploaded",
+            recommended_pipeline=recommended_pipeline,
+            analysis_metadata=analysis_metadata
         )
         db.add(document)
 
@@ -550,6 +567,7 @@ class BatchProcessRequest(BaseModel):
     only_pending: bool = True  # If False, reprocess all including completed
     fast_mode: bool = True  # Use fast text-only tagger (recommended)
     smart_mode: bool = False  # Use LLM-based tagger (requires GOOGLE_API_KEY)
+    auto_mode: bool = False  # Use recommended pipeline from document analysis
 
 
 def run_fast_pipeline(document_id: str, filepath: str):
@@ -623,6 +641,27 @@ def run_fast_pipeline(document_id: str, filepath: str):
 
     finally:
         db.close()
+
+
+def run_auto_pipeline(document_id: str, filepath: str, recommended_pipeline: str):
+    """Run the recommended pipeline based on document analysis."""
+    # Route to appropriate pipeline based on recommendation
+    if recommended_pipeline == 'fast':
+        run_fast_pipeline(document_id, filepath)
+    elif recommended_pipeline == 'smart' or recommended_pipeline == 'zone':
+        # Zone detection uses LLM, so route to smart pipeline
+        run_smart_pipeline(document_id, filepath)
+    elif recommended_pipeline == 'vision':
+        # Vision pipeline - for now use smart as fallback
+        # TODO: Implement dedicated vision pipeline
+        run_smart_pipeline(document_id, filepath)
+    elif recommended_pipeline == 'ocr':
+        # OCR pipeline - for now use fast with OCR extraction
+        # TODO: Implement dedicated OCR pipeline
+        run_fast_pipeline(document_id, filepath)
+    else:
+        # Default to fast
+        run_fast_pipeline(document_id, filepath)
 
 
 def run_smart_pipeline(document_id: str, filepath: str):
@@ -731,8 +770,8 @@ async def process_batch(
             "message": "No documents to process"
         }
 
-    # Collect document info before marking as processing
-    doc_info = [(doc.id, doc.filepath) for doc in documents]
+    # Collect document info before marking as processing (include recommended_pipeline for auto mode)
+    doc_info = [(doc.id, doc.filepath, doc.recommended_pipeline or 'fast') for doc in documents]
 
     # Mark all as processing
     for doc in documents:
@@ -740,14 +779,21 @@ async def process_batch(
     db.commit()
 
     # Choose pipeline based on mode
-    if request.smart_mode:
+    if request.auto_mode:
+        # Use recommended pipeline for each document
+        pipeline_counts = {'fast': 0, 'zone': 0, 'vision': 0, 'ocr': 0, 'smart': 0}
+        for doc_id, filepath, recommended in doc_info:
+            background_tasks.add_task(run_auto_pipeline, doc_id, filepath, recommended)
+            pipeline_counts[recommended] = pipeline_counts.get(recommended, 0) + 1
+        mode_msg = f"auto ({', '.join(f'{k}:{v}' for k,v in pipeline_counts.items() if v > 0)})"
+    elif request.smart_mode:
         # LLM-based pipeline (requires GOOGLE_API_KEY)
-        for doc_id, filepath in doc_info:
+        for doc_id, filepath, _ in doc_info:
             background_tasks.add_task(run_smart_pipeline, doc_id, filepath)
         mode_msg = "smart LLM-based (Gemini)"
     elif request.fast_mode:
         # Fast text-only pipeline
-        for doc_id, filepath in doc_info:
+        for doc_id, filepath, _ in doc_info:
             background_tasks.add_task(run_fast_pipeline, doc_id, filepath)
         mode_msg = "fast text-only"
     else:
@@ -756,7 +802,7 @@ async def process_batch(
         enable_vision = False
         vision_model = "microsoft/Florence-2-base"
 
-        for doc_id, filepath in doc_info:
+        for doc_id, filepath, _ in doc_info:
             background_tasks.add_task(
                 run_pipeline,
                 doc_id,
