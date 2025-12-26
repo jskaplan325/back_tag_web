@@ -828,6 +828,118 @@ def run_fast_pipeline(document_id: str, filepath: str):
         db.close()
 
 
+def run_ocr_pipeline(document_id: str, filepath: str):
+    """Run OCR pipeline using Surya for scanned documents."""
+    from ..database.db import SessionLocal, Document, Result, Model, ModelUsage
+    from ..services.surya_ocr import extract_text_from_pdf, extract_text_from_image_file, SURYA_AVAILABLE
+    from ..services.fast_tagger import (
+        get_model, load_taxonomy_tags, compute_tag_embeddings,
+        tag_text, compute_weighted_confidence
+    )
+    import uuid
+    import time
+
+    db = SessionLocal()
+    try:
+        start_time = time.time()
+        ext = Path(filepath).suffix.lower()
+
+        # Extract text using Surya OCR
+        if not SURYA_AVAILABLE:
+            raise ImportError("Surya OCR not available. Install: pip install surya-ocr")
+
+        if ext == '.pdf':
+            ocr_result = extract_text_from_pdf(filepath)
+        elif ext in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp']:
+            ocr_result = extract_text_from_image_file(filepath)
+        else:
+            raise ValueError(f"OCR not supported for {ext} files")
+
+        text = ocr_result.text
+        word_count = ocr_result.word_count
+        ocr_confidence = ocr_result.avg_confidence
+
+        # Now run semantic tagging on extracted text
+        model_name = "pile-of-law/legalbert-large-1.7M-2"
+        model = get_model(model_name)
+        tag_metadata = load_taxonomy_tags(db)
+        tag_embeddings = compute_tag_embeddings(tag_metadata, model)
+
+        tags = tag_text(text, model, tag_embeddings, tag_metadata)
+        processing_time = time.time() - start_time
+
+        # Create result record
+        result_id = str(uuid.uuid4())
+        result_data = {
+            'tags': tags,
+            'tag_count': len(tags),
+            'word_count': word_count,
+            'processing_time_seconds': processing_time,
+            'average_confidence': compute_weighted_confidence(tags),
+            'method': 'ocr_surya',
+            'model': model_name,
+            'ocr_engine': 'surya',
+            'ocr_device': ocr_result.device,
+            'ocr_confidence': ocr_confidence,
+            'bounding_boxes': len(ocr_result.lines)
+        }
+
+        result = Result(
+            id=result_id,
+            document_id=document_id,
+            processing_time_seconds=processing_time,
+            semantic_model=model_name,
+            vision_model='surya-ocr',
+            vision_enabled=True,
+            tag_count=len(tags),
+            average_confidence=result_data['average_confidence'],
+            result_json=result_data,
+            visual_pages=None
+        )
+        db.add(result)
+
+        # Get or create model in registry
+        model_rec = db.query(Model).filter(Model.name == model_name).first()
+        if not model_rec:
+            model_rec = Model(
+                id=str(uuid.uuid4()),
+                name=model_name,
+                type='semantic',
+                huggingface_url=f'https://huggingface.co/{model_name}',
+                approved=True
+            )
+            db.add(model_rec)
+            db.flush()
+
+        # Model usage
+        model_usage = ModelUsage(
+            id=str(uuid.uuid4()),
+            model_id=model_rec.id,
+            result_id=result_id,
+            processing_time_seconds=processing_time
+        )
+        db.add(model_usage)
+
+        # Update document
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if document:
+            document.status = "completed"
+            document.word_count = word_count
+            document.page_count = ocr_result.page_count
+
+        db.commit()
+
+    except Exception as e:
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if document:
+            document.status = "failed"
+            document.error_message = str(e)
+            db.commit()
+
+    finally:
+        db.close()
+
+
 def run_auto_pipeline(document_id: str, filepath: str, recommended_pipeline: str):
     """Run the recommended pipeline based on document analysis."""
     # Route to appropriate pipeline based on recommendation
@@ -837,13 +949,11 @@ def run_auto_pipeline(document_id: str, filepath: str, recommended_pipeline: str
         # Zone detection uses LLM, so route to smart pipeline
         run_smart_pipeline(document_id, filepath)
     elif recommended_pipeline == 'vision':
-        # Vision pipeline - for now use smart as fallback
-        # TODO: Implement dedicated vision pipeline
-        run_smart_pipeline(document_id, filepath)
+        # Vision pipeline - use OCR for visual content extraction
+        run_ocr_pipeline(document_id, filepath)
     elif recommended_pipeline == 'ocr':
-        # OCR pipeline - for now use fast with OCR extraction
-        # TODO: Implement dedicated OCR pipeline
-        run_fast_pipeline(document_id, filepath)
+        # OCR pipeline using Surya
+        run_ocr_pipeline(document_id, filepath)
     else:
         # Default to fast
         run_fast_pipeline(document_id, filepath)

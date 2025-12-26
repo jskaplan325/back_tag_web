@@ -23,3 +23,7 @@ pydantic>=2.5.0
 # PDF processing (for page images)
 pdf2image>=1.16.0
 Pillow>=9.5.0
+
+# OCR - Surya (GPU-accelerated, works on MPS/CUDA)
+# Much more accurate than Tesseract
+surya-ocr>=0.17.0
