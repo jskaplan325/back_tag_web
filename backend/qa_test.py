@@ -136,7 +136,7 @@ def test_taxonomy():
 
     # Check for expected areas
     area_names = [a['name'] for a in data]
-    expected_areas = ['Corporate/M&A', 'Finance', 'Investment Funds', 'Litigation']
+    expected_areas = ['M&A / Corporate', 'Securities / Capital Markets', 'Investment Funds', 'Litigation']
     for area in expected_areas:
         if area in area_names:
             test(f"Area '{area}' exists", True)
