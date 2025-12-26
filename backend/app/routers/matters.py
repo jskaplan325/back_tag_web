@@ -208,6 +208,44 @@ async def get_failed_documents(matter_id: str, db: Session = Depends(get_db)):
     ]
 
 
+@router.post("/{matter_id}/retry-failed")
+async def retry_failed_documents(
+    matter_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """Reset failed documents to uploaded and queue for reprocessing."""
+    matter = db.query(Matter).filter(Matter.id == matter_id).first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="Matter not found")
+
+    # Get failed documents
+    failed_docs = db.query(Document).filter(
+        Document.matter_id == matter_id,
+        Document.status == "failed"
+    ).all()
+
+    if not failed_docs:
+        return {"message": "No failed documents to retry", "count": 0}
+
+    # Collect info and reset status
+    doc_info = [(doc.id, doc.filepath, doc.recommended_pipeline or 'fast') for doc in failed_docs]
+
+    for doc in failed_docs:
+        doc.status = "processing"
+        doc.error_message = None
+    db.commit()
+
+    # Queue for reprocessing using auto pipeline
+    for doc_id, filepath, recommended in doc_info:
+        background_tasks.add_task(run_auto_pipeline, doc_id, filepath, recommended)
+
+    return {
+        "message": f"Queued {len(doc_info)} documents for retry",
+        "count": len(doc_info)
+    }
+
+
 @router.get("/{matter_id}/tags")
 async def get_matter_tags(matter_id: str, limit: int = 5, db: Session = Depends(get_db)):
     """Get aggregate top tags for a matter based on document processing results."""

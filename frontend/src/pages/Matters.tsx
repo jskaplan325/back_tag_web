@@ -820,6 +820,36 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
   )
 }
 
+function RetryButton({ matterId, count }: { matterId: string; count: number }) {
+  const queryClient = useQueryClient()
+  const retryMutation = useMutation({
+    mutationFn: () => api.post(`/api/matters/${matterId}/retry-failed`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['matters'] })
+      queryClient.invalidateQueries({ queryKey: ['failed-docs', matterId] })
+    },
+  })
+
+  return (
+    <button
+      onClick={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        retryMutation.mutate()
+      }}
+      disabled={retryMutation.isPending}
+      className="flex items-center gap-1 px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+    >
+      {retryMutation.isPending ? (
+        <Loader2 className="h-3 w-3 animate-spin" />
+      ) : (
+        <Play className="h-3 w-3" />
+      )}
+      Retry {count} failed
+    </button>
+  )
+}
+
 function MatterCard({
   matter,
   topTags
@@ -912,14 +942,20 @@ function MatterCard({
       {showErrors && matter.failed_count > 0 && (
         <div className="mt-2 p-2 bg-red-50 rounded text-xs">
           {failedDocs ? (
-            <ul className="space-y-1">
-              {failedDocs.map(doc => (
-                <li key={doc.id} className="text-red-700">
-                  <span className="font-medium">{doc.filename}:</span>{' '}
-                  <span className="text-red-600">{doc.error_message?.slice(0, 100)}...</span>
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul className="space-y-1 mb-2">
+                {failedDocs.slice(0, 3).map(doc => (
+                  <li key={doc.id} className="text-red-700">
+                    <span className="font-medium">{doc.filename}:</span>{' '}
+                    <span className="text-red-600">{doc.error_message?.slice(0, 80)}...</span>
+                  </li>
+                ))}
+                {failedDocs.length > 3 && (
+                  <li className="text-red-500">...and {failedDocs.length - 3} more</li>
+                )}
+              </ul>
+              <RetryButton matterId={matter.id} count={matter.failed_count} />
+            </>
           ) : (
             <span className="text-red-600">Loading...</span>
           )}
