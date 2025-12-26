@@ -238,6 +238,50 @@ class UnregisteredModel(BaseModel):
     first_seen: Optional[datetime]
 
 
+# Model name aliases - maps Ollama/shorthand names to registry names
+MODEL_ALIASES = {
+    'qwen2.5:7b': 'Qwen/Qwen2.5-7B-Instruct',
+    'qwen2.5:14b': 'Qwen/Qwen2.5-14B-Instruct',
+    'qwen2.5:32b': 'Qwen/Qwen2.5-32B-Instruct',
+    'llama3:8b': 'meta-llama/Meta-Llama-3-8B-Instruct',
+    'llama3:70b': 'meta-llama/Meta-Llama-3-70B-Instruct',
+    'mistral:7b': 'mistralai/Mistral-7B-Instruct-v0.2',
+    'gemma:7b': 'google/gemma-7b-it',
+}
+
+
+def normalize_model_name(name: str) -> str:
+    """Normalize model name to canonical registry format."""
+    if not name:
+        return name
+    # Check aliases first
+    if name.lower() in MODEL_ALIASES:
+        return MODEL_ALIASES[name.lower()]
+    # Check if it's an Ollama-style name (model:tag)
+    if ':' in name and '/' not in name:
+        return MODEL_ALIASES.get(name.lower(), name)
+    return name
+
+
+def is_model_registered(model_name: str, registered_names: set) -> bool:
+    """Check if a model (or its alias) is registered."""
+    if not model_name:
+        return True
+    # Direct match
+    if model_name in registered_names:
+        return True
+    # Check normalized name
+    normalized = normalize_model_name(model_name)
+    if normalized in registered_names:
+        return True
+    # Check if any registered name contains the base model name (fuzzy match)
+    base_name = model_name.split(':')[0].lower() if ':' in model_name else model_name.lower()
+    for reg_name in registered_names:
+        if base_name in reg_name.lower():
+            return True
+    return False
+
+
 @router.get("/check/unregistered", response_model=List[UnregisteredModel])
 async def check_unregistered_models(db: Session = Depends(get_db)):
     """
@@ -255,7 +299,7 @@ async def check_unregistered_models(db: Session = Depends(get_db)):
     unregistered = {}
     for result in results:
         # Check semantic model
-        if result.semantic_model and result.semantic_model not in registered:
+        if result.semantic_model and not is_model_registered(result.semantic_model, registered):
             if result.semantic_model not in unregistered:
                 unregistered[result.semantic_model] = {
                     'type': 'semantic',
@@ -267,7 +311,7 @@ async def check_unregistered_models(db: Session = Depends(get_db)):
                 unregistered[result.semantic_model]['first_seen'] = result.processed_at
 
         # Check vision model
-        if result.vision_model and result.vision_model not in registered:
+        if result.vision_model and not is_model_registered(result.vision_model, registered):
             if result.vision_model not in unregistered:
                 unregistered[result.vision_model] = {
                     'type': 'vision',
@@ -380,31 +424,64 @@ async def get_model_card(model_id: str, db: Session = Depends(get_db)):
 
     usage_count = db.query(ModelUsage).filter(ModelUsage.model_id == model_id).count()
 
-    # Fetch full model card from HuggingFace
-    readme = await fetch_model_card(model.name)
-    parsed_sections = {}
-    if readme:
-        sections = parse_model_card(readme)
-        parsed_sections = extract_model_summary(sections)
+    # Start with database fields (our curated content)
+    executive_summary = model.description
+    intended_uses = model.intended_use
+    limitations = model.limitations
+    training_data = model.training_data
+    training_procedure = None
+    bias_risks = model.bias_risks
 
-    # Fetch additional HuggingFace metadata
+    # If limitations exist, append bias risks
+    if limitations and bias_risks:
+        limitations = f"{limitations}\n\n**Bias & Risk Considerations:**\n{bias_risks}"
+    elif bias_risks:
+        limitations = f"**Bias & Risk Considerations:**\n{bias_risks}"
+
+    # Fetch additional HuggingFace metadata (only for HF models)
     tags = []
     pipeline_tag = None
     library_name = None
     likes = None
 
-    try:
-        async with httpx.AsyncClient() as client:
-            url = f"https://huggingface.co/api/models/{model.name}"
-            response = await client.get(url, timeout=10.0)
-            if response.status_code == 200:
-                data = response.json()
-                tags = data.get("tags", [])
-                pipeline_tag = data.get("pipeline_tag")
-                library_name = data.get("library_name")
-                likes = data.get("likes")
-    except Exception:
-        pass
+    is_huggingface = model.huggingface_url and 'huggingface.co' in model.huggingface_url
+
+    if is_huggingface:
+        # Try to fetch from HuggingFace for additional metadata
+        readme = await fetch_model_card(model.name)
+        if readme:
+            sections = parse_model_card(readme)
+            parsed_sections = extract_model_summary(sections)
+            # Only use HF content if we don't have curated DB content
+            if not executive_summary:
+                executive_summary = parsed_sections.get('executive_summary')
+            if not intended_uses:
+                intended_uses = parsed_sections.get('intended_uses')
+            if not limitations:
+                limitations = parsed_sections.get('limitations')
+            if not training_data:
+                training_data = parsed_sections.get('training_data')
+            if not training_procedure:
+                training_procedure = parsed_sections.get('training_procedure')
+
+        try:
+            async with httpx.AsyncClient() as client:
+                url = f"https://huggingface.co/api/models/{model.name}"
+                response = await client.get(url, timeout=10.0)
+                if response.status_code == 200:
+                    data = response.json()
+                    tags = data.get("tags", [])
+                    pipeline_tag = data.get("pipeline_tag")
+                    library_name = data.get("library_name")
+                    likes = data.get("likes")
+        except Exception:
+            pass
+
+    # For non-HF models, add relevant tags from architecture/type
+    if not tags:
+        if model.architecture:
+            tags.append(model.architecture.split(',')[0].strip())
+        tags.append(model.type)
 
     return ModelCardDetail(
         id=model.id,
@@ -420,11 +497,11 @@ async def get_model_card(model_id: str, db: Session = Depends(get_db)):
         approved_at=model.approved_at,
         created_at=model.created_at,
         usage_count=usage_count,
-        executive_summary=parsed_sections.get('executive_summary'),
-        intended_uses=parsed_sections.get('intended_uses'),
-        limitations=parsed_sections.get('limitations'),
-        training_data=parsed_sections.get('training_data'),
-        training_procedure=parsed_sections.get('training_procedure'),
+        executive_summary=executive_summary,
+        intended_uses=intended_uses,
+        limitations=limitations,
+        training_data=training_data,
+        training_procedure=training_procedure,
         tags=tags,
         pipeline_tag=pipeline_tag,
         library_name=library_name,
