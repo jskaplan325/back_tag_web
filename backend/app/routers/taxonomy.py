@@ -394,52 +394,20 @@ async def seed_default_taxonomy(db: Session = Depends(get_db)):
                 {
                     "name": "Merger Agreement",
                     "description": "Merger and acquisition agreements",
-                    "patterns": [
-                        r'merger\s+agreement',
-                        r'acquisition\s+agreement',
-                        r'agreement\s+and\s+plan\s+of\s+merger',
-                        r'business\s+combination',
-                        r'stock\s+purchase\s+agreement',
-                        r'asset\s+purchase\s+agreement',
-                    ],
-                    "semantic_examples": [
-                        "agreement and plan of merger between companies",
-                        "acquisition agreement for purchase of target company",
-                        "definitive merger agreement terms and conditions",
-                    ]
+                    "patterns": [r'merger\s+agreement', r'acquisition\s+agreement', r'agreement\s+and\s+plan\s+of\s+merger', r'business\s+combination', r'stock\s+purchase\s+agreement'],
+                    "semantic_examples": ["agreement and plan of merger between companies", "acquisition agreement for purchase of target company", "definitive merger agreement terms and conditions"]
                 },
                 {
                     "name": "Due Diligence",
                     "description": "Transaction due diligence materials",
-                    "patterns": [
-                        r'due\s+diligence',
-                        r'data\s+room',
-                        r'diligence\s+materials?',
-                        r'management\s+presentation',
-                        r'information\s+memorandum',
-                    ],
-                    "semantic_examples": [
-                        "due diligence materials and documentation",
-                        "data room documents for transaction review",
-                        "management presentation for potential buyers",
-                    ]
+                    "patterns": [r'due\s+diligence', r'data\s+room', r'diligence\s+materials?', r'management\s+presentation'],
+                    "semantic_examples": ["due diligence materials and documentation", "data room documents for transaction review"]
                 },
                 {
-                    "name": "Purchase Price",
-                    "description": "Valuation and purchase price terms",
-                    "patterns": [
-                        r'purchase\s+price',
-                        r'consideration',
-                        r'valuation',
-                        r'enterprise\s+value',
-                        r'earnout',
-                        r'escrow',
-                    ],
-                    "semantic_examples": [
-                        "purchase price and consideration payable",
-                        "enterprise value and equity valuation",
-                        "earnout payments based on performance",
-                    ]
+                    "name": "Corporate Governance",
+                    "description": "Board and governance matters",
+                    "patterns": [r'board\s+of\s+directors?', r'corporate\s+governance', r'bylaws?', r'charter', r'shareholder\s+agreement'],
+                    "semantic_examples": ["board of directors resolution and approval", "corporate governance policies and procedures", "shareholder agreement and voting rights"]
                 },
             ]
         },
@@ -451,90 +419,188 @@ async def seed_default_taxonomy(db: Session = Depends(get_db)):
                 {
                     "name": "Financial Statements",
                     "description": "Financial reports and statements",
-                    "patterns": [
-                        r'balance\s+sheet',
-                        r'income\s+statement',
-                        r'cash\s+flow\s+statement',
-                        r'financial\s+statements?',
-                        r'10-K',
-                        r'10-Q',
-                    ],
-                    "semantic_examples": [
-                        "financial statements showing assets and liabilities",
-                        "balance sheet with total equity and debt",
-                        "income statement with revenue and expenses",
-                    ]
+                    "patterns": [r'balance\s+sheet', r'income\s+statement', r'cash\s+flow', r'financial\s+statements?', r'10-K', r'10-Q'],
+                    "semantic_examples": ["financial statements showing assets and liabilities", "balance sheet with total equity and debt"]
                 },
                 {
                     "name": "Risk Factors",
                     "description": "Risk disclosures and factors",
-                    "patterns": [
-                        r'risk\s+factors?',
-                        r'risks?\s+and\s+uncertainties',
-                        r'forward.looking\s+statements?',
-                        r'material\s+risks?',
-                    ],
-                    "semantic_examples": [
-                        "risk factors that could affect future performance",
-                        "uncertainties and potential adverse effects",
-                        "material risks to the business operations",
-                    ]
+                    "patterns": [r'risk\s+factors?', r'risks?\s+and\s+uncertainties', r'forward.looking', r'material\s+risks?'],
+                    "semantic_examples": ["risk factors that could affect future performance", "material risks to business operations"]
                 },
                 {
                     "name": "Management Discussion",
                     "description": "MD&A and management analysis",
-                    "patterns": [
-                        r'management.s?\s+discussion',
-                        r'MD&A',
-                        r'management\s+analysis',
-                        r'results\s+of\s+operations',
-                    ],
-                    "semantic_examples": [
-                        "management's discussion and analysis of financial condition",
-                        "MD&A section discussing results of operations",
-                        "management analysis of liquidity and capital resources",
-                    ]
+                    "patterns": [r'management.s?\s+discussion', r'MD&A', r'results\s+of\s+operations', r'liquidity'],
+                    "semantic_examples": ["management's discussion and analysis of financial condition", "MD&A section discussing results of operations"]
                 },
                 {
-                    "name": "Securities Filings",
+                    "name": "SEC Filings",
                     "description": "SEC and regulatory filings",
-                    "patterns": [
-                        r'securities\s+and\s+exchange\s+commission',
-                        r'SEC\s+filing',
-                        r'form\s+S-1',
-                        r'form\s+8-K',
-                        r'proxy\s+statement',
-                        r'prospectus',
-                    ],
-                    "semantic_examples": [
-                        "SEC registration statement for securities offering",
-                        "proxy statement for shareholder meeting",
-                        "prospectus for initial public offering",
-                    ]
+                    "patterns": [r'securities\s+and\s+exchange', r'SEC', r'form\s+S-1', r'form\s+8-K', r'proxy\s+statement', r'prospectus'],
+                    "semantic_examples": ["SEC registration statement for securities offering", "proxy statement for shareholder meeting"]
+                },
+                {
+                    "name": "Executive Compensation",
+                    "description": "Executive pay and equity awards",
+                    "patterns": [r'executive\s+compensation', r'stock\s+option', r'equity\s+award', r'bonus', r'salary'],
+                    "semantic_examples": ["executive compensation and benefits package", "stock option grants and vesting schedule"]
                 },
             ]
         },
-        "Contracts / Commercial": {
-            "description": "Commercial agreements and contract terms",
-            "color": "#10b981",  # green
-            "icon": "FileText",
+        "Investment Funds": {
+            "description": "Private equity, venture capital, and investment funds",
+            "color": "#f59e0b",  # amber
+            "icon": "Landmark",
             "tags": [
                 {
-                    "name": "Contract Terms",
-                    "description": "General contract terms and provisions",
-                    "patterns": [
-                        r'terms?\s+and\s+conditions?',
-                        r'representations?\s+and\s+warranties',
-                        r'covenants?',
-                        r'indemnification',
-                        r'limitation\s+of\s+liability',
-                        r'governing\s+law',
-                    ],
-                    "semantic_examples": [
-                        "contractual terms and conditions of agreement",
-                        "representations and warranties of the parties",
-                        "indemnification obligations and procedures",
-                    ]
+                    "name": "Limited Partnership Agreement",
+                    "description": "LP and fund formation documents",
+                    "patterns": [r'limited\s+partnership\s+agreement', r'LPA', r'fund\s+formation', r'general\s+partner', r'limited\s+partner'],
+                    "semantic_examples": ["limited partnership agreement for investment fund", "LP agreement with capital commitment terms"]
+                },
+                {
+                    "name": "Capital Calls",
+                    "description": "Capital contributions and drawdowns",
+                    "patterns": [r'capital\s+call', r'capital\s+contribution', r'drawdown', r'commitment', r'unfunded'],
+                    "semantic_examples": ["capital call notice for committed funds", "drawdown request for investment"]
+                },
+                {
+                    "name": "Distribution",
+                    "description": "Fund distributions and waterfall",
+                    "patterns": [r'distribution', r'waterfall', r'carried\s+interest', r'carry', r'preferred\s+return'],
+                    "semantic_examples": ["distribution waterfall and carried interest", "preferred return calculation"]
+                },
+                {
+                    "name": "Side Letter",
+                    "description": "Investor side letters and special terms",
+                    "patterns": [r'side\s+letter', r'most\s+favored\s+nation', r'MFN', r'co-invest'],
+                    "semantic_examples": ["side letter with special fee arrangements", "most favored nation rights"]
+                },
+            ]
+        },
+        "Real Estate": {
+            "description": "Real property transactions and leases",
+            "color": "#84cc16",  # lime
+            "icon": "Home",
+            "tags": [
+                {
+                    "name": "Purchase Agreement",
+                    "description": "Real property purchase and sale",
+                    "patterns": [r'purchase\s+and\s+sale', r'real\s+property', r'deed', r'title', r'closing'],
+                    "semantic_examples": ["real property purchase and sale agreement", "deed transfer and title insurance"]
+                },
+                {
+                    "name": "Lease Agreement",
+                    "description": "Commercial and residential leases",
+                    "patterns": [r'lease\s+agreement', r'tenant', r'landlord', r'rent', r'premises'],
+                    "semantic_examples": ["commercial lease agreement for office space", "tenant obligations and rent payment"]
+                },
+                {
+                    "name": "Mortgage / Financing",
+                    "description": "Real estate financing documents",
+                    "patterns": [r'mortgage', r'deed\s+of\s+trust', r'lien', r'security\s+interest', r'loan\s+agreement'],
+                    "semantic_examples": ["mortgage loan for real property acquisition", "deed of trust and security interest"]
+                },
+            ]
+        },
+        "Employment": {
+            "description": "Employment and labor matters",
+            "color": "#06b6d4",  # cyan
+            "icon": "Users",
+            "tags": [
+                {
+                    "name": "Employment Agreement",
+                    "description": "Employment contracts and offers",
+                    "patterns": [r'employment\s+agreement', r'offer\s+letter', r'at-will', r'termination'],
+                    "semantic_examples": ["employment agreement with compensation terms", "offer letter for new hire"]
+                },
+                {
+                    "name": "Non-Compete / NDA",
+                    "description": "Restrictive covenants and confidentiality",
+                    "patterns": [r'non-compete', r'non-solicitation', r'confidentiality', r'NDA', r'trade\s+secret'],
+                    "semantic_examples": ["non-compete agreement restricting future employment", "confidentiality and non-disclosure agreement"]
+                },
+                {
+                    "name": "Benefits / ERISA",
+                    "description": "Employee benefits and retirement plans",
+                    "patterns": [r'401\(k\)', r'pension', r'ERISA', r'benefit\s+plan', r'health\s+insurance'],
+                    "semantic_examples": ["401(k) retirement plan with employer match", "ERISA compliance for benefit plans"]
+                },
+            ]
+        },
+        "Intellectual Property": {
+            "description": "Patents, trademarks, copyrights, and IP licensing",
+            "color": "#ec4899",  # pink
+            "icon": "Lightbulb",
+            "tags": [
+                {
+                    "name": "Patent",
+                    "description": "Patent applications and grants",
+                    "patterns": [r'patent', r'invention', r'claims?', r'prior\s+art', r'USPTO'],
+                    "semantic_examples": ["patent application for new invention", "patent claims and specifications"]
+                },
+                {
+                    "name": "Trademark",
+                    "description": "Trademarks and brand protection",
+                    "patterns": [r'trademark', r'service\s+mark', r'brand', r'logo', r'registration'],
+                    "semantic_examples": ["trademark registration for brand name", "service mark protection"]
+                },
+                {
+                    "name": "License Agreement",
+                    "description": "IP licensing and royalties",
+                    "patterns": [r'license\s+agreement', r'royalt', r'sublicense', r'intellectual\s+property\s+rights'],
+                    "semantic_examples": ["software license agreement with royalty terms", "IP licensing and sublicense rights"]
+                },
+            ]
+        },
+        "Litigation": {
+            "description": "Disputes, litigation, and settlements",
+            "color": "#ef4444",  # red
+            "icon": "Gavel",
+            "tags": [
+                {
+                    "name": "Complaint / Pleading",
+                    "description": "Court filings and pleadings",
+                    "patterns": [r'complaint', r'plaintiff', r'defendant', r'cause\s+of\s+action', r'prayer\s+for\s+relief'],
+                    "semantic_examples": ["complaint filed against defendant", "plaintiff's causes of action"]
+                },
+                {
+                    "name": "Settlement",
+                    "description": "Settlement agreements and releases",
+                    "patterns": [r'settlement\s+agreement', r'release', r'waiver', r'dismissal', r'confidential\s+settlement'],
+                    "semantic_examples": ["settlement agreement resolving dispute", "mutual release of all claims"]
+                },
+                {
+                    "name": "Discovery",
+                    "description": "Discovery requests and responses",
+                    "patterns": [r'discovery', r'interrogator', r'deposition', r'subpoena', r'document\s+request'],
+                    "semantic_examples": ["discovery requests for documents", "deposition testimony and transcripts"]
+                },
+            ]
+        },
+        "Regulatory / Compliance": {
+            "description": "Regulatory filings and compliance matters",
+            "color": "#6366f1",  # indigo
+            "icon": "Shield",
+            "tags": [
+                {
+                    "name": "Regulatory Filing",
+                    "description": "Government and regulatory submissions",
+                    "patterns": [r'regulatory\s+filing', r'compliance', r'government\s+approval', r'permit', r'license'],
+                    "semantic_examples": ["regulatory filing for government approval", "compliance with applicable regulations"]
+                },
+                {
+                    "name": "Anti-Corruption / FCPA",
+                    "description": "Anti-bribery and corruption compliance",
+                    "patterns": [r'FCPA', r'anti-corruption', r'bribery', r'foreign\s+corrupt', r'compliance\s+program'],
+                    "semantic_examples": ["FCPA compliance and anti-corruption policy", "anti-bribery due diligence"]
+                },
+                {
+                    "name": "Privacy / Data Protection",
+                    "description": "Data privacy and protection",
+                    "patterns": [r'GDPR', r'privacy', r'data\s+protection', r'personal\s+data', r'CCPA'],
+                    "semantic_examples": ["GDPR compliance for data protection", "privacy policy and data handling"]
                 },
             ]
         },
