@@ -19,12 +19,18 @@ _tag_embeddings: Dict[str, np.ndarray] = {}
 _tag_metadata: Dict[str, Dict] = {}
 
 
-def get_model(model_name: str = "pile-of-law/legalbert-large-1.7M-2") -> SentenceTransformer:
+def get_model(model_name: str = "pile-of-law/legalbert-large-1.7M-2", force_reload: bool = False) -> SentenceTransformer:
     """Get or initialize the sentence transformer model."""
     global _model
-    if _model is None:
+    if _model is None or force_reload:
         _model = SentenceTransformer(model_name)
     return _model
+
+
+def reset_model():
+    """Reset model to force reload on next use."""
+    global _model
+    _model = None
 
 
 def extract_text(filepath: str) -> str:
@@ -89,15 +95,23 @@ def load_taxonomy_tags(db_session) -> Dict[str, Dict]:
     return tags
 
 
-def compute_tag_embeddings(tags: Dict[str, Dict], model: SentenceTransformer) -> Dict[str, np.ndarray]:
+def compute_tag_embeddings(tags: Dict[str, Dict], model: SentenceTransformer, _retry: bool = False) -> Dict[str, np.ndarray]:
     """Pre-compute embeddings for all tag semantic examples."""
     embeddings = {}
 
-    for tag_name, tag_def in tags.items():
-        examples = tag_def.get('examples', [])
-        if examples:
-            emb = model.encode(examples, convert_to_numpy=True)
-            embeddings[tag_name] = np.mean(emb, axis=0)  # Average embedding
+    try:
+        for tag_name, tag_def in tags.items():
+            examples = tag_def.get('examples', [])
+            if examples:
+                emb = model.encode(examples, convert_to_numpy=True)
+                embeddings[tag_name] = np.mean(emb, axis=0)  # Average embedding
+    except RuntimeError as e:
+        if "meta tensor" in str(e) and not _retry:
+            # Model has corrupted state - reload and retry once
+            reset_model()
+            new_model = get_model(force_reload=True)
+            return compute_tag_embeddings(tags, new_model, _retry=True)
+        raise
 
     return embeddings
 
@@ -164,7 +178,8 @@ def tag_text(
     tag_metadata: Dict[str, Dict],
     threshold: float = 0.45,
     chunk_size: int = 200,
-    chunk_overlap: int = 50
+    chunk_overlap: int = 50,
+    _retry: bool = False
 ) -> List[Dict[str, Any]]:
     """Tag text using hybrid pattern + semantic similarity matching."""
 
@@ -179,8 +194,19 @@ def tag_text(
     if not chunks:
         return []
 
-    # Encode chunks
-    chunk_embeddings = model.encode(chunks, convert_to_numpy=True)
+    # Encode chunks with retry on meta tensor error
+    try:
+        chunk_embeddings = model.encode(chunks, convert_to_numpy=True)
+    except RuntimeError as e:
+        if "meta tensor" in str(e) and not _retry:
+            # Model has corrupted state - reload and retry once
+            reset_model()
+            new_model = get_model(force_reload=True)
+            return tag_text(
+                text, new_model, tag_embeddings, tag_metadata,
+                threshold, chunk_size, chunk_overlap, _retry=True
+            )
+        raise
 
     # Match against tags
     matches = []
