@@ -14,10 +14,13 @@ const queryClient = new QueryClient({
   },
 })
 
+// Use basename for GitHub Pages deployment
+const basename = window.location.hostname.includes('github.io') ? '/back_tag_web' : ''
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      <BrowserRouter basename={basename}>
         <App />
       </BrowserRouter>
     </QueryClientProvider>
