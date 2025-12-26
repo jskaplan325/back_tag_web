@@ -281,9 +281,9 @@ async def scan_folder(request: BulkImportRequest, db: Session = Depends(get_db))
 
     for item in sorted(folder_path.iterdir()):
         if item.is_dir() and not item.name.startswith('.'):
-            # Count documents in subfolder
+            # Count documents in subfolder (recursive)
             doc_count = 0
-            for file in item.iterdir():
+            for file in item.rglob('*'):
                 if file.is_file() and file.suffix.lower() in SUPPORTED_EXTENSIONS:
                     doc_count += 1
 
@@ -382,8 +382,8 @@ def infer_matter_type(folder_name: str) -> str:
 
 def import_matter_folder(db: Session, folder_path: Path, type_override: Optional[str] = None) -> tuple[Optional[Matter], int]:
     """Import a single folder as a matter with its documents. Overwrites if already exists."""
-    # Get list of supported files
-    files = [f for f in folder_path.iterdir()
+    # Get list of supported files (recursive)
+    files = [f for f in folder_path.rglob('*')
              if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS]
 
     if not files:
