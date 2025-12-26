@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -11,7 +12,9 @@ import {
   CheckCircle,
   Clock,
   XCircle,
-  Tag
+  Tag,
+  X,
+  RefreshCw
 } from 'lucide-react'
 import clsx from 'clsx'
 import api from '../api'
@@ -23,6 +26,13 @@ interface DocumentInMatter {
   uploaded_at: string
   file_size_bytes: number | null
   average_confidence?: number | null
+  error_message?: string | null
+}
+
+interface FailedDoc {
+  id: string
+  filename: string
+  error_message: string
 }
 
 interface MatterTag {
@@ -72,6 +82,105 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return bytes + ' B'
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
+function ErrorDetailsModal({
+  matterId,
+  matterName,
+  onClose
+}: {
+  matterId: string
+  matterName: string
+  onClose: () => void
+}) {
+  const queryClient = useQueryClient()
+
+  const { data: failedDocs, isLoading } = useQuery<FailedDoc[]>({
+    queryKey: ['failed-docs', matterId],
+    queryFn: () => api.get(`/api/matters/${matterId}/failed-documents`).then(r => r.data),
+  })
+
+  const retryMutation = useMutation({
+    mutationFn: () => api.post(`/api/matters/${matterId}/retry-failed`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['matter', matterId] })
+      queryClient.invalidateQueries({ queryKey: ['failed-docs', matterId] })
+      onClose()
+    },
+  })
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-lg rounded-lg bg-white shadow-xl mx-4 max-h-[80vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b">
+          <div className="flex items-center gap-3">
+            <div className="rounded-full bg-red-100 p-2">
+              <XCircle className="h-5 w-5 text-red-600" />
+            </div>
+            <div>
+              <h2 className="font-semibold">Failed Documents</h2>
+              <p className="text-sm text-gray-500">{matterName}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-auto p-4">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+            </div>
+          ) : failedDocs && failedDocs.length > 0 ? (
+            <div className="space-y-3">
+              {failedDocs.map(doc => (
+                <div key={doc.id} className="bg-red-50 border border-red-100 rounded-lg p-3">
+                  <p className="font-medium text-sm text-gray-900 truncate" title={doc.filename}>
+                    {doc.filename}
+                  </p>
+                  <p className="mt-1 text-sm text-red-600 break-words">
+                    {doc.error_message || 'Unknown error'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-center text-gray-500 py-8">No failed documents</p>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between p-4 border-t bg-gray-50">
+          <p className="text-sm text-gray-500">
+            {failedDocs?.length || 0} document{(failedDocs?.length || 0) !== 1 ? 's' : ''} failed
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-gray-600 hover:text-gray-800"
+            >
+              Close
+            </button>
+            <button
+              onClick={() => retryMutation.mutate()}
+              disabled={retryMutation.isPending || !failedDocs?.length}
+              className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+            >
+              {retryMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              Retry All
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function DocumentRow({ doc, matterId }: { doc: DocumentInMatter; matterId: string }) {
@@ -168,10 +277,12 @@ function DocumentRow({ doc, matterId }: { doc: DocumentInMatter; matterId: strin
 export default function MatterDetailPage() {
   const { id } = useParams<{ id: string }>()
   const queryClient = useQueryClient()
+  const [showErrorModal, setShowErrorModal] = useState(false)
 
   const { data: matter, isLoading, error } = useQuery<MatterDetail>({
     queryKey: ['matter', id],
     queryFn: () => api.get(`/api/matters/${id}`).then(r => r.data),
+    refetchInterval: 3000, // Auto-refresh to show processing updates
   })
 
   const { data: tagsData } = useQuery<MatterTagsResponse>({
@@ -222,6 +333,8 @@ export default function MatterDetailPage() {
   const color = matterTypeColors[matter.matter_type || 'General'] || matterTypeColors['General']
   const pendingCount = matter.documents.filter(d => d.status === 'uploaded').length
   const completedCount = matter.documents.filter(d => d.status === 'completed').length
+  const failedCount = matter.documents.filter(d => d.status === 'failed').length
+  const processingCount = matter.documents.filter(d => d.status === 'processing').length
 
   return (
     <div className="p-8 max-w-6xl mx-auto">
@@ -277,7 +390,7 @@ export default function MatterDetailPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-4 gap-4 mb-6">
         <div className="rounded-lg bg-white p-4 shadow">
           <p className="text-2xl font-bold">{matter.document_count}</p>
           <p className="text-sm text-gray-500">Total Documents</p>
@@ -287,8 +400,34 @@ export default function MatterDetailPage() {
           <p className="text-sm text-gray-500">Processed</p>
         </div>
         <div className="rounded-lg bg-white p-4 shadow">
-          <p className="text-2xl font-bold text-gray-500">{pendingCount}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-2xl font-bold text-gray-500">{pendingCount}</p>
+            {processingCount > 0 && (
+              <span className="flex items-center gap-1 text-sm text-blue-600">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                {processingCount}
+              </span>
+            )}
+          </div>
           <p className="text-sm text-gray-500">Pending</p>
+        </div>
+        <div className="rounded-lg bg-white p-4 shadow">
+          {failedCount > 0 ? (
+            <button
+              onClick={() => setShowErrorModal(true)}
+              className="w-full text-left hover:bg-red-50 -m-4 p-4 rounded-lg transition-colors"
+            >
+              <p className="text-2xl font-bold text-red-600">{failedCount}</p>
+              <p className="text-sm text-red-500 flex items-center gap-1">
+                Failed <span className="text-xs">(click for details)</span>
+              </p>
+            </button>
+          ) : (
+            <>
+              <p className="text-2xl font-bold text-gray-300">0</p>
+              <p className="text-sm text-gray-400">Failed</p>
+            </>
+          )}
         </div>
       </div>
 
@@ -344,6 +483,15 @@ export default function MatterDetailPage() {
           <h3 className="mt-4 text-lg font-medium text-gray-600">No documents</h3>
           <p className="mt-2 text-gray-400">This matter has no documents yet</p>
         </div>
+      )}
+
+      {/* Error Details Modal */}
+      {showErrorModal && matter && (
+        <ErrorDetailsModal
+          matterId={matter.id}
+          matterName={matter.name}
+          onClose={() => setShowErrorModal(false)}
+        />
       )}
     </div>
   )

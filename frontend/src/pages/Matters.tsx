@@ -160,6 +160,21 @@ function ProcessWarningModal({
   )
 }
 
+interface LLMStatus {
+  smart_mode_available: boolean
+  preferred_backend: string | null
+  ollama: {
+    available: boolean
+    url: string
+    model: string
+    models_installed: string[]
+  }
+  gemini: {
+    available: boolean
+    api_key_set: boolean
+  }
+}
+
 function ProcessingStatusPanel({
   stats,
   isExpanded,
@@ -173,6 +188,13 @@ function ProcessingStatusPanel({
   const totalCompleted = stats?.reduce((sum, s) => sum + s.completed_count, 0) || 0
   const totalFailed = stats?.reduce((sum, s) => sum + s.failed_count, 0) || 0
   const totalPending = stats?.reduce((sum, s) => sum + s.pending_count, 0) || 0
+
+  // Fetch LLM status
+  const { data: llmStatus } = useQuery<LLMStatus>({
+    queryKey: ['llm-status'],
+    queryFn: () => api.get('/api/llm-status').then(r => r.data),
+    staleTime: 30000, // Cache for 30 seconds
+  })
 
   const isActive = totalProcessing > 0
 
@@ -228,7 +250,38 @@ function ProcessingStatusPanel({
       {/* Expanded details */}
       {isExpanded && stats && (
         <div className="px-4 pb-3 border-t border-gray-200">
-          <div className="mt-3 space-y-2 max-h-64 overflow-y-auto">
+          {/* LLM Backend Info */}
+          {llmStatus && (
+            <div className="mt-3 mb-3 p-2 bg-gray-50 rounded-lg text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-500">Smart Mode:</span>
+                {llmStatus.smart_mode_available ? (
+                  <span className="flex items-center gap-1 text-green-600">
+                    <CheckCircle className="h-3 w-3" />
+                    {llmStatus.ollama.available ? (
+                      <span>Local ({llmStatus.ollama.model})</span>
+                    ) : (
+                      <span>Cloud (Gemini)</span>
+                    )}
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-gray-400">
+                    <XCircle className="h-3 w-3" />
+                    Not configured
+                  </span>
+                )}
+              </div>
+              {llmStatus.ollama.available && (
+                <div className="flex items-center justify-between mt-1">
+                  <span className="text-gray-500">Ollama:</span>
+                  <span className="text-gray-600">{llmStatus.ollama.models_installed.join(', ')}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Matter type breakdown */}
+          <div className="space-y-2 max-h-48 overflow-y-auto">
             {stats.map((s) => {
               const progress = s.document_count > 0
                 ? Math.round((s.completed_count / s.document_count) * 100)
