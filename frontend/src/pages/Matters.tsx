@@ -923,18 +923,21 @@ function MatterCard({
           </span>
         )}
         {matter.failed_count > 0 && (
-          <button
-            onClick={(e) => {
-              e.preventDefault()
-              setShowErrors(!showErrors)
-            }}
-            className="flex items-center gap-1 text-red-600 hover:text-red-800"
-            title="Click to see error details"
-          >
-            <XCircle className="h-3 w-3" />
-            {matter.failed_count} failed
-            {showErrors ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={(e) => {
+                e.preventDefault()
+                setShowErrors(!showErrors)
+              }}
+              className="flex items-center gap-1 text-red-600 hover:text-red-800"
+              title="Click to see error details"
+            >
+              <XCircle className="h-3 w-3" />
+              {matter.failed_count} failed
+              {showErrors ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            </button>
+            <RetryButton matterId={matter.id} count={matter.failed_count} />
+          </div>
         )}
       </div>
 
@@ -943,7 +946,7 @@ function MatterCard({
         <div className="mt-2 p-2 bg-red-50 rounded text-xs">
           {failedDocs ? (
             <>
-              <ul className="space-y-1 mb-2">
+              <ul className="space-y-1">
                 {failedDocs.slice(0, 3).map(doc => (
                   <li key={doc.id} className="text-red-700">
                     <span className="font-medium">{doc.filename}:</span>{' '}
@@ -954,7 +957,6 @@ function MatterCard({
                   <li className="text-red-500">...and {failedDocs.length - 3} more</li>
                 )}
               </ul>
-              <RetryButton matterId={matter.id} count={matter.failed_count} />
             </>
           ) : (
             <span className="text-red-600">Loading...</span>
