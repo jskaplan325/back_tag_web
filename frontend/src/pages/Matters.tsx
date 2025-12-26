@@ -485,7 +485,6 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
   const selectedReimports = scanResult?.subfolders
     .filter(f => selections[f.path] && f.already_imported) || []
   const reimportCount = selectedReimports.length
-  const reimportDocCount = selectedReimports.reduce((sum, f) => sum + f.document_count, 0)
 
   // Get effective type (override or inferred)
   const getEffectiveType = (folder: SubfolderInfo) =>
@@ -987,10 +986,6 @@ export default function Matters() {
   const [processingMode, setProcessingMode] = useState<'fast' | 'smart' | 'auto'>('auto')
   const [showStatusPanel, setShowStatusPanel] = useState(true)
   const queryClient = useQueryClient()
-
-  // Check if any processing is happening to increase refresh rate
-  const isProcessing = (matters?: MatterWithStats[]) =>
-    matters?.some(m => m.pending_count > 0 && m.completed_count > 0) || false
 
   // Fetch individual matters
   const { data: matters, isLoading, error } = useQuery<MatterWithStats[]>({
