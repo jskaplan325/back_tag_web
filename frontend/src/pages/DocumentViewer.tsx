@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   ArrowLeft,
@@ -120,6 +120,7 @@ interface TextContent {
 
 export default function DocumentViewer() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [currentPage, setCurrentPage] = useState(1)
   const [zoom, setZoom] = useState(1)
   const [viewMode, setViewMode] = useState<'auto' | 'text' | 'image'>('auto')
@@ -186,9 +187,13 @@ export default function DocumentViewer() {
       {/* Header */}
       <div className="flex items-center justify-between border-b bg-white px-4 py-3">
         <div className="flex items-center gap-4">
-          <Link to="/documents" className="text-gray-500 hover:text-gray-700">
+          <button
+            onClick={() => navigate(-1)}
+            className="text-gray-500 hover:text-gray-700"
+            title="Go back"
+          >
             <ArrowLeft className="h-5 w-5" />
-          </Link>
+          </button>
           <h1 className="text-lg font-semibold">{document.filename}</h1>
         </div>
         <div className="flex items-center gap-4">
