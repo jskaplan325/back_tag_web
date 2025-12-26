@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Doc Intelligence</title>
+  <script>
+    // GitHub Pages SPA redirect hack
+    // Converts path to query param and redirects to index.html
+    // e.g., /back_tag_web/documents/123 -> /back_tag_web/?p=/documents/123
+    const path = window.location.pathname;
+    const base = '/back_tag_web';
+    const relativePath = path.startsWith(base) ? path.slice(base.length) : path;
+    if (relativePath && relativePath !== '/') {
+      window.location.replace(base + '/?p=' + encodeURIComponent(relativePath));
+    } else {
+      window.location.replace(base + '/');
+    }
+  </script>
+</head>
+<body>
+  <p>Redirecting...</p>
+</body>
+</html>

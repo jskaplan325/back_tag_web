@@ -5,9 +5,11 @@ import {
   Box,
   BarChart3,
   Scale,
-  FolderOpen
+  FolderOpen,
+  AlertCircle
 } from 'lucide-react'
 import clsx from 'clsx'
+import { DEMO_MODE } from './api'
 
 // Pages
 import Dashboard from './pages/Dashboard'
@@ -64,11 +66,23 @@ function Sidebar() {
   )
 }
 
+function DemoBanner() {
+  if (!DEMO_MODE) return null
+  return (
+    <div className="bg-amber-500 text-amber-950 px-4 py-2 flex items-center justify-center gap-2 text-sm font-medium">
+      <AlertCircle className="h-4 w-4" />
+      <span>Demo Mode - Viewing sample data. Connect to backend for full functionality.</span>
+    </div>
+  )
+}
+
 function App() {
   return (
     <div className="flex h-screen">
       <Sidebar />
-      <main className="flex-1 overflow-auto">
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <DemoBanner />
+        <main className="flex-1 overflow-auto">
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/documents" element={<Documents />} />
@@ -82,7 +96,8 @@ function App() {
           <Route path="/models/:id" element={<ModelDetail />} />
           <Route path="/metrics" element={<Metrics />} />
         </Routes>
-      </main>
+        </main>
+      </div>
     </div>
   )
 }
