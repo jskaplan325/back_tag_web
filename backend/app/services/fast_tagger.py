@@ -323,6 +323,22 @@ def process_document_fast(
     }
 
 
+def get_taxonomy_embeddings(db_session, model_name: str = "pile-of-law/legalbert-large-1.7M-2"):
+    """
+    Get taxonomy tag embeddings and metadata.
+    Used by llm_tagger for smart mode processing.
+    """
+    global _tag_embeddings, _tag_metadata
+
+    model = get_model(model_name)
+
+    if not _tag_metadata:
+        _tag_metadata = load_taxonomy_tags(db_session)
+        _tag_embeddings = compute_tag_embeddings(_tag_metadata, model)
+
+    return _tag_embeddings, _tag_metadata
+
+
 def clear_cache():
     """Clear cached model and embeddings (useful for testing or reloading taxonomy)."""
     global _model, _tag_embeddings, _tag_metadata
