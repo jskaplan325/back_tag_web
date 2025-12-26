@@ -1105,6 +1105,7 @@ export default function Matters() {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedMatters, setSelectedMatters] = useState<Set<string>>(new Set())
   const [errorMatter, setErrorMatter] = useState<MatterWithStats | null>(null)
+  const [showReprocessConfirm, setShowReprocessConfirm] = useState(false)
   const queryClient = useQueryClient()
 
   // Fetch individual matters
@@ -1153,9 +1154,10 @@ export default function Matters() {
   })
 
   const processSelectedMutation = useMutation({
-    mutationFn: (matterIds: string[]) =>
+    mutationFn: ({ matterIds, onlyPending }: { matterIds: string[], onlyPending: boolean }) =>
       api.post('/api/matters/process-selected', {
         matter_ids: matterIds,
+        only_pending: onlyPending,
         fast_mode: processingMode === 'fast',
         smart_mode: processingMode === 'smart',
         auto_mode: processingMode === 'auto'
@@ -1199,6 +1201,33 @@ export default function Matters() {
     } else {
       setSelectedMatters(new Set(filteredMatters.map(m => m.id)))
     }
+  }
+
+  // Check if selected matters have completed documents (for reprocess warning)
+  const selectedMattersData = matters?.filter(m => selectedMatters.has(m.id)) || []
+  const completedDocsInSelection = selectedMattersData.reduce((sum, m) => sum + m.completed_count, 0)
+  const pendingDocsInSelection = selectedMattersData.reduce((sum, m) => sum + m.pending_count, 0)
+  const hasCompletedDocs = completedDocsInSelection > 0
+
+  // Handle process selected click
+  const handleProcessSelected = () => {
+    if (hasCompletedDocs) {
+      setShowReprocessConfirm(true)
+    } else {
+      processSelectedMutation.mutate({
+        matterIds: Array.from(selectedMatters),
+        onlyPending: true
+      })
+    }
+  }
+
+  // Confirm reprocess
+  const confirmReprocess = () => {
+    processSelectedMutation.mutate({
+      matterIds: Array.from(selectedMatters),
+      onlyPending: false  // Reprocess all including completed
+    })
+    setShowReprocessConfirm(false)
   }
 
   const totalStats = matters?.reduce(
@@ -1326,16 +1355,21 @@ export default function Matters() {
 
             {selectedMatters.size > 0 && (
               <button
-                onClick={() => processSelectedMutation.mutate(Array.from(selectedMatters))}
+                onClick={handleProcessSelected}
                 disabled={processSelectedMutation.isPending}
-                className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                className={clsx(
+                  "flex items-center gap-2 px-4 py-2 text-white rounded-lg disabled:opacity-50",
+                  hasCompletedDocs
+                    ? "bg-orange-600 hover:bg-orange-700"
+                    : "bg-purple-600 hover:bg-purple-700"
+                )}
               >
                 {processSelectedMutation.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <Play className="h-4 w-4" />
                 )}
-                Process Selected ({selectedMatters.size})
+                {hasCompletedDocs ? '(Re)Process' : 'Process'} Selected ({selectedMatters.size})
               </button>
             )}
           </>
@@ -1416,6 +1450,66 @@ export default function Matters() {
           matter={errorMatter}
           onClose={() => setErrorMatter(null)}
         />
+      )}
+
+      {/* Reprocess Confirmation Modal */}
+      {showReprocessConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-md rounded-lg bg-white shadow-xl mx-4">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="rounded-full bg-orange-100 p-2">
+                  <AlertTriangle className="h-5 w-5 text-orange-600" />
+                </div>
+                <h2 className="text-lg font-semibold">Reprocess Documents?</h2>
+              </div>
+
+              <p className="text-gray-600 mb-4">
+                You're about to reprocess documents that have already been completed:
+              </p>
+
+              <div className="bg-gray-50 rounded-lg p-3 mb-4 text-sm">
+                <div className="flex justify-between mb-1">
+                  <span className="text-gray-500">Matters selected:</span>
+                  <span className="font-medium">{selectedMatters.size}</span>
+                </div>
+                <div className="flex justify-between mb-1">
+                  <span className="text-gray-500">Already completed:</span>
+                  <span className="font-medium text-orange-600">{completedDocsInSelection} docs</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Pending:</span>
+                  <span className="font-medium">{pendingDocsInSelection} docs</span>
+                </div>
+              </div>
+
+              <p className="text-sm text-gray-500 mb-6">
+                This will overwrite existing results for the completed documents.
+              </p>
+
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => setShowReprocessConfirm(false)}
+                  className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmReprocess}
+                  disabled={processSelectedMutation.isPending}
+                  className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50"
+                >
+                  {processSelectedMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Play className="h-4 w-4" />
+                  )}
+                  Reprocess All
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
