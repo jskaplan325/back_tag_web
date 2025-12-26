@@ -179,10 +179,10 @@ function ModelCard({ model, onApprove }: { model: Model; onApprove: (id: string)
           </div>
           <div className="flex items-center gap-2">
             <span className={clsx(
-              'px-2 py-1 rounded text-xs',
+              'px-2 py-1 rounded text-xs font-medium',
               model.approved ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
             )}>
-              {model.approved ? 'Approved' : 'Pending'}
+              {model.approved ? 'RAI Approved' : 'Pending Review'}
             </span>
             <ChevronRight className="h-4 w-4 text-gray-400" />
           </div>
@@ -213,13 +213,15 @@ function ModelCard({ model, onApprove }: { model: Model; onApprove: (id: string)
 
       <div className="mt-4 flex items-center gap-3">
         <a
-          href={model.huggingface_url}
+          href={model.huggingface_url?.startsWith('http')
+            ? model.huggingface_url
+            : `https://huggingface.co/${model.name}`}
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-1 text-sm text-blue-600 hover:underline"
         >
           <ExternalLink className="h-4 w-4" />
-          HuggingFace
+          View on HuggingFace
         </a>
         {!model.approved && (
           <button
@@ -227,7 +229,7 @@ function ModelCard({ model, onApprove }: { model: Model; onApprove: (id: string)
             className="flex items-center gap-1 text-sm text-green-600 hover:underline"
           >
             <Check className="h-4 w-4" />
-            Approve
+            Approve Model
           </button>
         )}
       </div>

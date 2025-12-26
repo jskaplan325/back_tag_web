@@ -14,7 +14,10 @@ import {
   Check,
   RefreshCw,
   Loader2,
-  Tag
+  Tag,
+  Building,
+  GitBranch,
+  Scale
 } from 'lucide-react'
 import clsx from 'clsx'
 import api from '../api'
@@ -193,7 +196,7 @@ export default function ModelDetail() {
             'px-3 py-1 rounded-full text-sm font-medium',
             model.approved ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
           )}>
-            {model.approved ? 'Approved' : 'Pending Review'}
+            {model.approved ? 'RAI Approved' : 'Pending Review'}
           </span>
           <span className={clsx(
             'px-3 py-1 rounded-full text-sm font-medium',
@@ -302,6 +305,73 @@ export default function ModelDetail() {
           </Section>
         )}
 
+        {/* Origin & Provenance */}
+        <Section title="Origin & Provenance" icon={Building}>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <span className="text-gray-500 text-sm">Organization</span>
+                <p className="font-medium">{model.name.split('/')[0] || 'Unknown'}</p>
+              </div>
+              <div>
+                <span className="text-gray-500 text-sm">Model Name</span>
+                <p className="font-medium">{model.name.split('/').pop()}</p>
+              </div>
+              <div>
+                <span className="text-gray-500 text-sm">Full Identifier</span>
+                <p className="font-mono text-sm">{model.name}</p>
+              </div>
+              {model.library_name && (
+                <div>
+                  <span className="text-gray-500 text-sm">Library</span>
+                  <p className="font-medium">{model.library_name}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+              <div className="flex items-start gap-2">
+                <Scale className="h-4 w-4 text-blue-600 mt-0.5" />
+                <div className="text-sm">
+                  <p className="font-medium text-blue-800">Responsible AI Review Note</p>
+                  <p className="text-blue-700 mt-1">
+                    Before approving, verify the organization's reputation, check for known issues
+                    with the model, and review any geopolitical considerations related to the
+                    model's origin and funding sources.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Section>
+
+        {/* Architecture Overview (if available from tags) */}
+        {model.pipeline_tag && (
+          <Section title="Architecture" icon={GitBranch}>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-600">Pipeline:</span>
+                <span className="font-medium">{model.pipeline_tag}</span>
+              </div>
+              {model.library_name && (
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600">Framework:</span>
+                  <span className="font-medium">{model.library_name}</span>
+                </div>
+              )}
+              {model.tags && model.tags.some(t => t.includes('transformer')) && (
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600">Architecture Type:</span>
+                  <span className="font-medium">Transformer-based</span>
+                </div>
+              )}
+              <p className="text-sm text-gray-500 mt-2">
+                For detailed architecture information, view the full model card on HuggingFace.
+              </p>
+            </div>
+          </Section>
+        )}
+
         {/* License Info */}
         <Section title="License & Legal" icon={Shield}>
           <div className="space-y-3">
@@ -350,19 +420,19 @@ export default function ModelDetail() {
       </div>
 
       {/* HuggingFace Link */}
-      {model.huggingface_url && (
-        <div className="mt-8 pt-6 border-t">
-          <a
-            href={model.huggingface_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 text-blue-600 hover:underline"
-          >
-            View full model card on HuggingFace
-            <ExternalLink className="h-4 w-4" />
-          </a>
-        </div>
-      )}
+      <div className="mt-8 pt-6 border-t">
+        <a
+          href={model.huggingface_url?.startsWith('http')
+            ? model.huggingface_url
+            : `https://huggingface.co/${model.name}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 text-blue-600 hover:underline"
+        >
+          View full model card on HuggingFace
+          <ExternalLink className="h-4 w-4" />
+        </a>
+      </div>
     </div>
   )
 }
