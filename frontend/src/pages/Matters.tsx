@@ -70,6 +70,19 @@ interface TypeStats {
   average_confidence: number | null
 }
 
+interface MatterWithStats {
+  id: string
+  name: string
+  matter_type: string | null
+  source_path: string | null
+  created_at: string
+  document_count: number
+  pending_count: number
+  completed_count: number
+  failed_count: number
+  average_confidence: number | null
+}
+
 const matterTypeColors: Record<string, string> = {
   'Investment Funds': '#3b82f6',
   'M&A / Corporate': '#8b5cf6',
@@ -807,120 +820,93 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-function MatterTypeCard({
-  stats,
-  onProcessNew,
-  onProcessAll,
-  isProcessing
+function MatterCard({
+  matter,
+  topTags
 }: {
-  stats: TypeStats
-  onProcessNew: () => void
-  onProcessAll: () => void
-  isProcessing: boolean
+  matter: MatterWithStats
+  topTags?: { tag: string; average_confidence: number }[]
 }) {
-  const color = matterTypeColors[stats.matter_type] || '#6b7280'
-  const hasNew = stats.pending_count > 0
-  const hasAny = stats.document_count > 0
+  const progress = matter.document_count > 0
+    ? Math.round((matter.completed_count / matter.document_count) * 100)
+    : 0
 
   return (
-    <div className="rounded-lg bg-white p-6 shadow hover:shadow-md transition-shadow">
-      <div className="flex items-start justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <div
-            className="rounded-lg p-3"
-            style={{ backgroundColor: `${color}20` }}
-          >
-            <FolderOpen className="h-6 w-6" style={{ color }} />
-          </div>
-          <div>
-            <h3 className="font-semibold text-lg">{stats.matter_type}</h3>
-            <p className="text-sm text-gray-500">{stats.matter_count} matters</p>
-          </div>
-        </div>
-        <Link
-          to={`/matters/type/${encodeURIComponent(stats.matter_type)}`}
-          className="text-gray-400 hover:text-gray-600"
-        >
-          <ChevronRight className="h-5 w-5" />
-        </Link>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-5 gap-2 mb-4">
-        <div className="text-center">
-          <p className="text-lg font-bold">{stats.document_count}</p>
-          <p className="text-xs text-gray-500">Total</p>
-        </div>
-        <div className="text-center">
-          <p className="text-lg font-bold text-gray-500">{stats.pending_count}</p>
-          <p className="text-xs text-gray-500">Pending</p>
-        </div>
-        <div className="text-center">
-          <p className="text-lg font-bold text-green-600">{stats.completed_count}</p>
-          <p className="text-xs text-gray-500">Done</p>
-        </div>
-        <div className="text-center">
-          <p className="text-lg font-bold text-red-600">{stats.failed_count}</p>
-          <p className="text-xs text-gray-500">Failed</p>
-        </div>
-        <div className="text-center">
-          <p className={clsx(
-            "text-lg font-bold",
-            stats.average_confidence != null && stats.average_confidence >= 0.7 && "text-green-600",
-            stats.average_confidence != null && stats.average_confidence >= 0.5 && stats.average_confidence < 0.7 && "text-yellow-600",
-            stats.average_confidence != null && stats.average_confidence < 0.5 && "text-red-600",
-            stats.average_confidence == null && "text-gray-400"
-          )}>
-            {stats.average_confidence != null ? `${(stats.average_confidence * 100).toFixed(0)}%` : '-'}
+    <Link
+      to={`/matters/${matter.id}`}
+      className="block rounded-lg bg-white p-4 shadow hover:shadow-md transition-shadow"
+    >
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex-1 min-w-0">
+          <h3 className="font-semibold text-sm truncate" title={matter.name}>
+            {matter.name}
+          </h3>
+          <p className="text-xs text-gray-500">
+            {matter.document_count} docs
           </p>
-          <p className="text-xs text-gray-500">Conf.</p>
+        </div>
+        <div className="flex items-center gap-2 ml-2">
+          {matter.average_confidence != null && (
+            <span className={clsx(
+              "text-xs font-medium px-1.5 py-0.5 rounded",
+              matter.average_confidence >= 0.7 && "bg-green-100 text-green-700",
+              matter.average_confidence >= 0.5 && matter.average_confidence < 0.7 && "bg-yellow-100 text-yellow-700",
+              matter.average_confidence < 0.5 && "bg-red-100 text-red-700"
+            )}>
+              {(matter.average_confidence * 100).toFixed(0)}%
+            </span>
+          )}
+          <ChevronRight className="h-4 w-4 text-gray-400" />
         </div>
       </div>
 
       {/* Progress bar */}
-      {stats.document_count > 0 && (
-        <div className="h-2 bg-gray-100 rounded-full overflow-hidden mb-4">
-          <div
-            className="h-full bg-green-500 transition-all"
-            style={{ width: `${(stats.completed_count / stats.document_count) * 100}%` }}
-          />
+      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden mb-2">
+        <div
+          className={clsx(
+            "h-full rounded-full transition-all",
+            matter.failed_count > 0 ? "bg-red-500" : "bg-green-500"
+          )}
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+
+      {/* Status */}
+      <div className="flex items-center gap-2 text-xs text-gray-500">
+        {matter.pending_count > 0 && (
+          <span className="flex items-center gap-1">
+            <Clock className="h-3 w-3" />
+            {matter.pending_count} pending
+          </span>
+        )}
+        {matter.completed_count > 0 && (
+          <span className="flex items-center gap-1 text-green-600">
+            <CheckCircle className="h-3 w-3" />
+            {matter.completed_count} done
+          </span>
+        )}
+        {matter.failed_count > 0 && (
+          <span className="flex items-center gap-1 text-red-600">
+            <XCircle className="h-3 w-3" />
+            {matter.failed_count} failed
+          </span>
+        )}
+      </div>
+
+      {/* Top tags */}
+      {topTags && topTags.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {topTags.slice(0, 3).map((t) => (
+            <span
+              key={t.tag}
+              className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded"
+            >
+              {t.tag}
+            </span>
+          ))}
         </div>
       )}
-
-      {/* Process buttons */}
-      <div className="flex gap-2">
-        <button
-          onClick={onProcessNew}
-          disabled={!hasNew || isProcessing}
-          className={clsx(
-            "flex-1 flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-            hasNew
-              ? "bg-blue-600 text-white hover:bg-blue-700"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed"
-          )}
-        >
-          {isProcessing ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Play className="h-4 w-4" />
-          )}
-          New ({stats.pending_count})
-        </button>
-        <button
-          onClick={onProcessAll}
-          disabled={!hasAny || isProcessing}
-          className={clsx(
-            "flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-            hasAny
-              ? "bg-gray-100 text-gray-700 hover:bg-gray-200"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed"
-          )}
-        >
-          <Clock className="h-4 w-4" />
-          All
-        </button>
-      </div>
-    </div>
+    </Link>
   )
 }
 
@@ -928,17 +914,25 @@ export default function Matters() {
   const [showImportModal, setShowImportModal] = useState(false)
   const [processAllTarget, setProcessAllTarget] = useState<{ type: string | null, count: number } | null>(null)
   const [processingMode, setProcessingMode] = useState<'fast' | 'smart' | 'auto'>('auto')
-  const [showStatusPanel, setShowStatusPanel] = useState(true)  // Processing status panel
+  const [showStatusPanel, setShowStatusPanel] = useState(true)
   const queryClient = useQueryClient()
 
   // Check if any processing is happening to increase refresh rate
-  const isProcessing = (stats?: TypeStats[]) =>
-    stats?.some(s => s.processing_count > 0) || false
+  const isProcessing = (matters?: MatterWithStats[]) =>
+    matters?.some(m => m.pending_count > 0 && m.completed_count > 0) || false
 
-  const { data: stats, isLoading, error } = useQuery<TypeStats[]>({
+  // Fetch individual matters
+  const { data: matters, isLoading, error } = useQuery<MatterWithStats[]>({
+    queryKey: ['matters'],
+    queryFn: () => api.get('/api/matters').then(r => r.data),
+    refetchInterval: 3000,
+  })
+
+  // Also fetch stats for the status panel
+  const { data: stats } = useQuery<TypeStats[]>({
     queryKey: ['matter-stats'],
     queryFn: () => api.get('/api/matters/stats/by-type').then(r => r.data),
-    refetchInterval: (query) => isProcessing(query.state.data) ? 2000 : 5000,
+    refetchInterval: 3000,
   })
 
   const processNewMutation = useMutation({
@@ -951,8 +945,8 @@ export default function Matters() {
         auto_mode: processingMode === 'auto'
       }),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['matters'] })
       queryClient.invalidateQueries({ queryKey: ['matter-stats'] })
-      queryClient.invalidateQueries({ queryKey: ['documents'] })
     },
   })
 
@@ -966,18 +960,18 @@ export default function Matters() {
         auto_mode: processingMode === 'auto'
       }),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['matters'] })
       queryClient.invalidateQueries({ queryKey: ['matter-stats'] })
-      queryClient.invalidateQueries({ queryKey: ['documents'] })
       setProcessAllTarget(null)
     },
   })
 
-  const totalStats = stats?.reduce(
-    (acc, s) => ({
-      matters: acc.matters + s.matter_count,
-      documents: acc.documents + s.document_count,
-      pending: acc.pending + s.pending_count,
-      completed: acc.completed + s.completed_count,
+  const totalStats = matters?.reduce(
+    (acc, m) => ({
+      matters: acc.matters + 1,
+      documents: acc.documents + m.document_count,
+      pending: acc.pending + m.pending_count,
+      completed: acc.completed + m.completed_count,
     }),
     { matters: 0, documents: 0, pending: 0, completed: 0 }
   ) || { matters: 0, documents: 0, pending: 0, completed: 0 }
@@ -1082,18 +1076,12 @@ export default function Matters() {
           <h3 className="mt-2 font-medium text-red-800">Failed to load matters</h3>
           <p className="mt-1 text-sm text-red-600">Make sure the backend is running</p>
         </div>
-      ) : stats && stats.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {stats.map((typeStat) => (
-            <MatterTypeCard
-              key={typeStat.matter_type}
-              stats={typeStat}
-              onProcessNew={() => processNewMutation.mutate(typeStat.matter_type)}
-              onProcessAll={() => setProcessAllTarget({
-                type: typeStat.matter_type,
-                count: typeStat.document_count
-              })}
-              isProcessing={processNewMutation.isPending || processAllMutation.isPending}
+      ) : matters && matters.length > 0 ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+          {matters.map((matter) => (
+            <MatterCard
+              key={matter.id}
+              matter={matter}
             />
           ))}
         </div>
