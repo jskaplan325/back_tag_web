@@ -186,6 +186,28 @@ async def get_matter(matter_id: str, db: Session = Depends(get_db)):
     }
 
 
+@router.get("/{matter_id}/failed-documents")
+async def get_failed_documents(matter_id: str, db: Session = Depends(get_db)):
+    """Get failed documents for a matter with error messages."""
+    matter = db.query(Matter).filter(Matter.id == matter_id).first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="Matter not found")
+
+    failed_docs = db.query(Document).filter(
+        Document.matter_id == matter_id,
+        Document.status == "failed"
+    ).all()
+
+    return [
+        {
+            "id": doc.id,
+            "filename": doc.filename,
+            "error_message": doc.error_message
+        }
+        for doc in failed_docs
+    ]
+
+
 @router.get("/{matter_id}/tags")
 async def get_matter_tags(matter_id: str, limit: int = 5, db: Session = Depends(get_db)):
     """Get aggregate top tags for a matter based on document processing results."""

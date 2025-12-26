@@ -827,38 +827,45 @@ function MatterCard({
   matter: MatterWithStats
   topTags?: { tag: string; average_confidence: number }[]
 }) {
+  const [showErrors, setShowErrors] = useState(false)
   const progress = matter.document_count > 0
     ? Math.round((matter.completed_count / matter.document_count) * 100)
     : 0
 
+  // Fetch failed documents when clicking on failed count
+  const { data: failedDocs } = useQuery<{ id: string; filename: string; error_message: string }[]>({
+    queryKey: ['failed-docs', matter.id],
+    queryFn: () => api.get(`/api/matters/${matter.id}/failed-documents`).then(r => r.data),
+    enabled: showErrors && matter.failed_count > 0,
+  })
+
   return (
-    <Link
-      to={`/matters/${matter.id}`}
-      className="block rounded-lg bg-white p-4 shadow hover:shadow-md transition-shadow"
-    >
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-sm truncate" title={matter.name}>
-            {matter.name}
-          </h3>
-          <p className="text-xs text-gray-500">
-            {matter.document_count} docs
-          </p>
+    <div className="rounded-lg bg-white p-4 shadow hover:shadow-md transition-shadow">
+      <Link to={`/matters/${matter.id}`}>
+        <div className="flex items-start justify-between mb-3">
+          <div className="flex-1 min-w-0">
+            <h3 className="font-semibold text-sm truncate" title={matter.name}>
+              {matter.name}
+            </h3>
+            <p className="text-xs text-gray-500">
+              {matter.document_count} docs
+            </p>
+          </div>
+          <div className="flex items-center gap-2 ml-2">
+            {matter.average_confidence != null && (
+              <span className={clsx(
+                "text-xs font-medium px-1.5 py-0.5 rounded",
+                matter.average_confidence >= 0.7 && "bg-green-100 text-green-700",
+                matter.average_confidence >= 0.5 && matter.average_confidence < 0.7 && "bg-yellow-100 text-yellow-700",
+                matter.average_confidence < 0.5 && "bg-red-100 text-red-700"
+              )}>
+                {(matter.average_confidence * 100).toFixed(0)}%
+              </span>
+            )}
+            <ChevronRight className="h-4 w-4 text-gray-400" />
+          </div>
         </div>
-        <div className="flex items-center gap-2 ml-2">
-          {matter.average_confidence != null && (
-            <span className={clsx(
-              "text-xs font-medium px-1.5 py-0.5 rounded",
-              matter.average_confidence >= 0.7 && "bg-green-100 text-green-700",
-              matter.average_confidence >= 0.5 && matter.average_confidence < 0.7 && "bg-yellow-100 text-yellow-700",
-              matter.average_confidence < 0.5 && "bg-red-100 text-red-700"
-            )}>
-              {(matter.average_confidence * 100).toFixed(0)}%
-            </span>
-          )}
-          <ChevronRight className="h-4 w-4 text-gray-400" />
-        </div>
-      </div>
+      </Link>
 
       {/* Progress bar */}
       <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden mb-2">
@@ -886,12 +893,38 @@ function MatterCard({
           </span>
         )}
         {matter.failed_count > 0 && (
-          <span className="flex items-center gap-1 text-red-600">
+          <button
+            onClick={(e) => {
+              e.preventDefault()
+              setShowErrors(!showErrors)
+            }}
+            className="flex items-center gap-1 text-red-600 hover:text-red-800"
+            title="Click to see error details"
+          >
             <XCircle className="h-3 w-3" />
             {matter.failed_count} failed
-          </span>
+            {showErrors ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+          </button>
         )}
       </div>
+
+      {/* Error details */}
+      {showErrors && matter.failed_count > 0 && (
+        <div className="mt-2 p-2 bg-red-50 rounded text-xs">
+          {failedDocs ? (
+            <ul className="space-y-1">
+              {failedDocs.map(doc => (
+                <li key={doc.id} className="text-red-700">
+                  <span className="font-medium">{doc.filename}:</span>{' '}
+                  <span className="text-red-600">{doc.error_message?.slice(0, 100)}...</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <span className="text-red-600">Loading...</span>
+          )}
+        </div>
+      )}
 
       {/* Top tags */}
       {topTags && topTags.length > 0 && (
@@ -906,7 +939,7 @@ function MatterCard({
           ))}
         </div>
       )}
-    </Link>
+    </div>
   )
 }
 
