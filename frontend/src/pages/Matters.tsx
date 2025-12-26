@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -259,8 +259,124 @@ function ProcessingStatusPanel({
   )
 }
 
+interface BrowseFolder {
+  name: string
+  path: string
+}
+
+interface BrowseResult {
+  current_path: string
+  parent_path: string | null
+  folders: BrowseFolder[]
+}
+
+function FolderBrowser({
+  onSelect,
+  onCancel
+}: {
+  onSelect: (path: string) => void
+  onCancel: () => void
+}) {
+  const [currentPath, setCurrentPath] = useState<string | null>(null)
+  const [folders, setFolders] = useState<BrowseFolder[]>([])
+  const [parentPath, setParentPath] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  const browseTo = async (path: string | null) => {
+    setLoading(true)
+    try {
+      const response = await api.post('/api/matters/browse-folder', { path })
+      const data: BrowseResult = response.data
+      setCurrentPath(data.current_path)
+      setParentPath(data.parent_path)
+      setFolders(data.folders)
+    } catch (err) {
+      console.error('Browse error:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Load initial folder on mount
+  useEffect(() => {
+    browseTo(null)
+  }, [])
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-lg rounded-lg bg-white p-4 shadow-xl mx-4 max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold">Browse Folders</h3>
+          <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Current path */}
+        <div className="text-xs text-gray-500 bg-gray-50 px-2 py-1 rounded mb-2 font-mono truncate">
+          {currentPath || 'Loading...'}
+        </div>
+
+        {/* Folder list */}
+        <div className="flex-1 border rounded overflow-auto min-h-[200px] max-h-[400px]">
+          {loading ? (
+            <div className="flex items-center justify-center h-32">
+              <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+            </div>
+          ) : (
+            <div className="divide-y">
+              {/* Parent folder */}
+              {parentPath && (
+                <button
+                  onClick={() => browseTo(parentPath)}
+                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left"
+                >
+                  <ChevronUp className="h-4 w-4 text-gray-400" />
+                  <span className="text-gray-600">..</span>
+                </button>
+              )}
+              {/* Subfolders */}
+              {folders.map((folder) => (
+                <button
+                  key={folder.path}
+                  onClick={() => browseTo(folder.path)}
+                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left"
+                >
+                  <FolderOpen className="h-4 w-4 text-blue-500" />
+                  <span className="truncate">{folder.name}</span>
+                </button>
+              ))}
+              {folders.length === 0 && !parentPath && (
+                <div className="text-center text-gray-400 py-8">No folders found</div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex justify-end gap-2 mt-3">
+          <button
+            onClick={onCancel}
+            className="px-3 py-1.5 text-gray-600 hover:text-gray-800"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => currentPath && onSelect(currentPath)}
+            disabled={!currentPath}
+            className="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+          >
+            Select This Folder
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function BulkImportModal({ onClose }: { onClose: () => void }) {
-  const [folderPath, setFolderPath] = useState('/Users/jaredkaplan/Projects/legal_dataset/legal_test_matters')
+  const [folderPath, setFolderPath] = useState('')
+  const [showBrowser, setShowBrowser] = useState(false)
   const [scanResult, setScanResult] = useState<ScanResult | null>(null)
   const [selections, setSelections] = useState<Record<string, boolean>>({})
   const [typeOverrides, setTypeOverrides] = useState<Record<string, string>>({})
@@ -391,13 +507,22 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
           <>
             <div className="mb-4">
               <label className="block text-sm font-medium mb-1">Folder Path</label>
-              <input
-                type="text"
-                value={folderPath}
-                onChange={(e) => setFolderPath(e.target.value)}
-                placeholder="/path/to/legal_dataset"
-                className="w-full rounded-lg border p-2 font-mono text-sm"
-              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={folderPath}
+                  onChange={(e) => setFolderPath(e.target.value)}
+                  placeholder="/path/to/legal_dataset"
+                  className="flex-1 rounded-lg border p-2 font-mono text-sm"
+                />
+                <button
+                  onClick={() => setShowBrowser(true)}
+                  className="px-3 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 text-gray-700"
+                  title="Browse folders"
+                >
+                  <FolderOpen className="h-4 w-4" />
+                </button>
+              </div>
               <p className="text-xs text-gray-500 mt-1">
                 Each subfolder will become a matter, and files within will be imported as documents.
               </p>
@@ -406,7 +531,7 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
             <button
               onClick={() => scanMutation.mutate()}
               disabled={scanMutation.isPending || !folderPath}
-              className="flex items-center gap-2 rounded-lg bg-gray-100 px-4 py-2 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+              className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
             >
               {scanMutation.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -666,6 +791,17 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Folder Browser Modal */}
+      {showBrowser && (
+        <FolderBrowser
+          onSelect={(path) => {
+            setFolderPath(path)
+            setShowBrowser(false)
+          }}
+          onCancel={() => setShowBrowser(false)}
+        />
       )}
     </div>
   )

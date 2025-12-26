@@ -262,6 +262,56 @@ async def delete_matter(matter_id: str, db: Session = Depends(get_db)):
     return {"message": "Matter deleted", "id": matter_id}
 
 
+class BrowseFolderRequest(BaseModel):
+    path: Optional[str] = None  # None = list root/home
+
+
+class BrowseFolderResult(BaseModel):
+    current_path: str
+    parent_path: Optional[str]
+    folders: List[dict]  # name, path
+
+
+@router.post("/browse-folder", response_model=BrowseFolderResult)
+async def browse_folder(request: BrowseFolderRequest):
+    """Browse folders on the server filesystem."""
+    import platform
+
+    # Determine starting path
+    if not request.path:
+        # Start at user's home directory
+        current = Path.home()
+    else:
+        current = Path(request.path)
+
+    if not current.exists():
+        raise HTTPException(status_code=400, detail=f"Path not found: {request.path}")
+
+    if not current.is_dir():
+        raise HTTPException(status_code=400, detail=f"Not a directory: {request.path}")
+
+    # Get parent (None if at root)
+    parent = str(current.parent) if current.parent != current else None
+
+    # List subdirectories
+    folders = []
+    try:
+        for item in sorted(current.iterdir()):
+            if item.is_dir() and not item.name.startswith('.'):
+                folders.append({
+                    "name": item.name,
+                    "path": str(item)
+                })
+    except PermissionError:
+        pass  # Skip folders we can't access
+
+    return BrowseFolderResult(
+        current_path=str(current),
+        parent_path=parent,
+        folders=folders
+    )
+
+
 @router.post("/scan-folder", response_model=FolderScanResult)
 async def scan_folder(request: BulkImportRequest, db: Session = Depends(get_db)):
     """Scan a folder to preview what would be imported."""
