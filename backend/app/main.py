@@ -80,3 +80,47 @@ async def health_check():
         "uploads_dir": str(UPLOADS_DIR),
         "results_dir": str(RESULTS_DIR),
     }
+
+
+@app.get("/api/llm-status")
+async def llm_status():
+    """Check available LLM backends for Smart Mode."""
+    from .services.llm_tagger import (
+        check_ollama_available, OLLAMA_MODEL, OLLAMA_BASE_URL,
+        GEMINI_AVAILABLE, get_available_backend
+    )
+    import requests
+
+    result = {
+        "smart_mode_available": False,
+        "preferred_backend": None,
+        "ollama": {
+            "available": False,
+            "url": OLLAMA_BASE_URL,
+            "model": OLLAMA_MODEL,
+            "models_installed": []
+        },
+        "gemini": {
+            "available": False,
+            "api_key_set": bool(os.getenv('GOOGLE_API_KEY'))
+        }
+    }
+
+    # Check Ollama
+    try:
+        response = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=2)
+        if response.status_code == 200:
+            models = response.json().get('models', [])
+            result["ollama"]["available"] = True
+            result["ollama"]["models_installed"] = [m.get('name', '') for m in models]
+    except Exception:
+        pass
+
+    # Check Gemini
+    result["gemini"]["available"] = GEMINI_AVAILABLE and result["gemini"]["api_key_set"]
+
+    # Set overall status
+    result["smart_mode_available"] = result["ollama"]["available"] or result["gemini"]["available"]
+    result["preferred_backend"] = get_available_backend()
+
+    return result
