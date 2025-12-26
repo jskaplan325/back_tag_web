@@ -300,10 +300,18 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
       const selectedFolders = Object.entries(selections)
         .filter(([_, selected]) => selected)
         .map(([path]) => path)
+      // Build name overrides from scan result
+      const nameOverrides: Record<string, string> = {}
+      scanResult?.subfolders.forEach(folder => {
+        if (selections[folder.path]) {
+          nameOverrides[folder.path] = folder.name
+        }
+      })
       return api.post('/api/matters/bulk-import', {
         folder_path: folderPath,
         selected_folders: selectedFolders,
-        type_overrides: typeOverrides
+        type_overrides: typeOverrides,
+        name_overrides: nameOverrides
       })
     },
     onSuccess: (response) => {

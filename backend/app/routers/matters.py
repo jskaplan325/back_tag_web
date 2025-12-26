@@ -77,6 +77,7 @@ class BulkImportRequest(BaseModel):
     folder_path: str
     selected_folders: Optional[List[str]] = None  # If None, import all non-empty folders
     type_overrides: Optional[dict] = None  # Map of folder_path -> matter_type override
+    name_overrides: Optional[dict] = None  # Map of folder_path -> matter_name (for nested folders)
 
 
 class BulkImportResult(BaseModel):
@@ -281,31 +282,62 @@ async def scan_folder(request: BulkImportRequest, db: Session = Depends(get_db))
 
     for item in sorted(folder_path.iterdir()):
         if item.is_dir() and not item.name.startswith('.'):
-            # Count documents in subfolder (recursive)
-            doc_count = 0
-            for file in item.rglob('*'):
-                if file.is_file() and file.suffix.lower() in SUPPORTED_EXTENSIONS:
-                    doc_count += 1
+            # Check if this folder has direct files or only subfolders
+            direct_files = [f for f in item.iterdir()
+                          if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS]
+            child_dirs = [d for d in item.iterdir()
+                         if d.is_dir() and not d.name.startswith('.')]
 
-            # Infer matter type from folder name
-            matter_type = infer_matter_type(item.name)
-            item_path = str(item)
-            already_imported = item_path in imported_paths
+            if direct_files:
+                # Folder has direct files - treat as single matter
+                doc_count = len(direct_files)
+                # Also count files in subfolders
+                for file in item.rglob('*'):
+                    if file.is_file() and file.suffix.lower() in SUPPORTED_EXTENSIONS and file.parent != item:
+                        doc_count += 1
 
-            # Select by default if has documents AND not already imported
-            selected = doc_count > 0 and not already_imported
+                matter_type = infer_matter_type(item.name)
+                item_path = str(item)
+                already_imported = item_path in imported_paths
+                selected = doc_count > 0 and not already_imported
 
-            subfolders.append({
-                "name": item.name,
-                "path": item_path,
-                "document_count": doc_count,
-                "matter_type": matter_type,
-                "selected": selected,
-                "already_imported": already_imported
-            })
+                subfolders.append({
+                    "name": item.name,
+                    "path": item_path,
+                    "document_count": doc_count,
+                    "matter_type": matter_type,
+                    "selected": selected,
+                    "already_imported": already_imported
+                })
 
-            if selected:
-                total_documents += doc_count
+                if selected:
+                    total_documents += doc_count
+            elif child_dirs:
+                # Folder only has subfolders - each subfolder becomes a matter
+                for child in sorted(child_dirs):
+                    doc_count = 0
+                    for file in child.rglob('*'):
+                        if file.is_file() and file.suffix.lower() in SUPPORTED_EXTENSIONS:
+                            doc_count += 1
+
+                    # Name as parent_child
+                    matter_name = f"{item.name}_{child.name}"
+                    matter_type = infer_matter_type(matter_name)
+                    child_path = str(child)
+                    already_imported = child_path in imported_paths
+                    selected = doc_count > 0 and not already_imported
+
+                    subfolders.append({
+                        "name": matter_name,
+                        "path": child_path,
+                        "document_count": doc_count,
+                        "matter_type": matter_type,
+                        "selected": selected,
+                        "already_imported": already_imported
+                    })
+
+                    if selected:
+                        total_documents += doc_count
 
     return FolderScanResult(
         folder_path=str(folder_path),
@@ -335,24 +367,40 @@ async def bulk_import(
     total_documents = 0
     errors = []
 
-    # Get type overrides
+    # Get overrides
     type_overrides = request.type_overrides or {}
+    name_overrides = request.name_overrides or {}
 
-    for item in sorted(folder_path.iterdir()):
-        if item.is_dir() and not item.name.startswith('.'):
-            # Skip if we have a selection list and this folder isn't in it
-            if selected_set is not None and str(item) not in selected_set:
+    # Import each selected folder
+    if selected_set:
+        for folder_path_str in selected_set:
+            item = Path(folder_path_str)
+            if not item.exists() or not item.is_dir():
+                errors.append(f"Folder not found: {folder_path_str}")
                 continue
 
             try:
-                # Check for type override
-                override_type = type_overrides.get(str(item))
-                matter, doc_count = import_matter_folder(db, item, override_type)
+                override_type = type_overrides.get(folder_path_str)
+                override_name = name_overrides.get(folder_path_str)
+                matter, doc_count = import_matter_folder(db, item, override_type, override_name)
                 if matter:
                     matters_created.append(matter)
                     total_documents += doc_count
             except Exception as e:
                 errors.append(f"Error importing {item.name}: {str(e)}")
+    else:
+        # No selection - import all top-level folders
+        for item in sorted(folder_path.iterdir()):
+            if item.is_dir() and not item.name.startswith('.'):
+                try:
+                    override_type = type_overrides.get(str(item))
+                    override_name = name_overrides.get(str(item))
+                    matter, doc_count = import_matter_folder(db, item, override_type, override_name)
+                    if matter:
+                        matters_created.append(matter)
+                        total_documents += doc_count
+                except Exception as e:
+                    errors.append(f"Error importing {item.name}: {str(e)}")
 
     return BulkImportResult(
         matters_created=len(matters_created),
@@ -380,7 +428,7 @@ def infer_matter_type(folder_name: str) -> str:
     return 'TBD'
 
 
-def import_matter_folder(db: Session, folder_path: Path, type_override: Optional[str] = None) -> tuple[Optional[Matter], int]:
+def import_matter_folder(db: Session, folder_path: Path, type_override: Optional[str] = None, name_override: Optional[str] = None) -> tuple[Optional[Matter], int]:
     """Import a single folder as a matter with its documents. Overwrites if already exists."""
     # Get list of supported files (recursive)
     files = [f for f in folder_path.rglob('*')
@@ -389,8 +437,11 @@ def import_matter_folder(db: Session, folder_path: Path, type_override: Optional
     if not files:
         return None, 0
 
-    # Use override if provided, otherwise infer from folder name
-    matter_type = type_override if type_override else infer_matter_type(folder_path.name)
+    # Use name override if provided, otherwise use folder name
+    matter_name = name_override if name_override else folder_path.name
+
+    # Use type override if provided, otherwise infer from matter name
+    matter_type = type_override if type_override else infer_matter_type(matter_name)
 
     # Check if matter already exists (by source_path)
     existing_matter = db.query(Matter).filter(Matter.source_path == str(folder_path)).first()
@@ -418,7 +469,7 @@ def import_matter_folder(db: Session, folder_path: Path, type_override: Optional
         matter_id = str(uuid.uuid4())
         matter = Matter(
             id=matter_id,
-            name=folder_path.name,
+            name=matter_name,
             matter_type=matter_type,
             source_path=str(folder_path),
             document_count=len(files)
