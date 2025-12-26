@@ -18,11 +18,20 @@ import {
 import clsx from 'clsx'
 import api from '../api'
 
+interface Highlight {
+  start: number
+  end: number
+  text: string
+  pattern: string
+}
+
 interface Tag {
   tag: string
   confidence: number
   pattern_matches: number
   semantic_similarity: number
+  highlights?: Highlight[]
+  area?: string
 }
 
 interface VisualPages {
@@ -118,12 +127,27 @@ interface TextContent {
   filename: string
 }
 
+// Color palette for different tags
+const TAG_COLORS: Record<string, string> = {
+  'M&A / Corporate': 'bg-purple-200 border-purple-400',
+  'Securities / Capital Markets': 'bg-blue-200 border-blue-400',
+  'Investment Funds': 'bg-amber-200 border-amber-400',
+  'Litigation': 'bg-red-200 border-red-400',
+  'Real Estate': 'bg-green-200 border-green-400',
+  'Employment': 'bg-cyan-200 border-cyan-400',
+  'Intellectual Property': 'bg-pink-200 border-pink-400',
+  'Regulatory / Compliance': 'bg-indigo-200 border-indigo-400',
+}
+
+const DEFAULT_HIGHLIGHT_COLOR = 'bg-yellow-200 border-yellow-400'
+
 export default function DocumentViewer() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [currentPage, setCurrentPage] = useState(1)
   const [zoom, setZoom] = useState(1)
   const [viewMode, setViewMode] = useState<'auto' | 'text' | 'image'>('auto')
+  const [selectedTag, setSelectedTag] = useState<string | null>(null)
 
   const { data: document, isLoading: docLoading } = useQuery<DocumentDetail>({
     queryKey: ['document', id],
@@ -173,6 +197,62 @@ export default function DocumentViewer() {
   const visualPages = result?.result_json?.visual_pages
   const tags = result?.result_json?.tags || []
   const pageCount = document.page_count || 1
+
+  // Get highlights for selected tag or all tags
+  const getHighlights = (): Array<Highlight & { tagName: string; area: string }> => {
+    const allHighlights: Array<Highlight & { tagName: string; area: string }> = []
+    for (const tag of tags) {
+      if (selectedTag && tag.tag !== selectedTag) continue
+      for (const h of tag.highlights || []) {
+        allHighlights.push({ ...h, tagName: tag.tag, area: tag.area || '' })
+      }
+    }
+    // Sort by position, remove overlaps
+    allHighlights.sort((a, b) => a.start - b.start)
+    return allHighlights
+  }
+
+  // Render text with highlighted matches
+  const renderHighlightedText = (text: string) => {
+    const highlights = getHighlights()
+    if (highlights.length === 0) {
+      return <span>{text}</span>
+    }
+
+    const parts: JSX.Element[] = []
+    let lastEnd = 0
+
+    for (let i = 0; i < highlights.length; i++) {
+      const h = highlights[i]
+      // Skip overlapping highlights
+      if (h.start < lastEnd) continue
+
+      // Add text before highlight
+      if (h.start > lastEnd) {
+        parts.push(<span key={`text-${i}`}>{text.slice(lastEnd, h.start)}</span>)
+      }
+
+      // Add highlighted text
+      const colorClass = TAG_COLORS[h.area] || DEFAULT_HIGHLIGHT_COLOR
+      parts.push(
+        <mark
+          key={`hl-${i}`}
+          className={clsx('px-0.5 rounded border', colorClass)}
+          title={`${h.tagName}: "${h.text}"`}
+        >
+          {text.slice(h.start, h.end)}
+        </mark>
+      )
+      lastEnd = h.end
+    }
+
+    // Add remaining text
+    if (lastEnd < text.length) {
+      parts.push(<span key="text-end">{text.slice(lastEnd)}</span>)
+    }
+
+    return <>{parts}</>
+  }
 
   const getVisualType = (page: number): 'chart' | 'table' | 'sparse' | null => {
     if (!visualPages) return null
@@ -295,9 +375,9 @@ export default function DocumentViewer() {
                   <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
                 </div>
               ) : textContent?.text ? (
-                <pre className="whitespace-pre-wrap font-mono text-sm text-gray-800 leading-relaxed">
-                  {textContent.text}
-                </pre>
+                <div className="whitespace-pre-wrap font-mono text-sm text-gray-800 leading-relaxed">
+                  {renderHighlightedText(textContent.text)}
+                </div>
               ) : (
                 <div className="text-center text-gray-400 py-12">
                   <FileText className="mx-auto h-12 w-12 mb-4" />
@@ -368,30 +448,53 @@ export default function DocumentViewer() {
 
           {tags.length > 0 && (
             <div className="p-4">
-              <h3 className="font-medium mb-3">Detected Tags</h3>
-              <div className="space-y-2">
-                {tags.map((tag) => (
-                  <div
-                    key={tag.tag}
-                    className="rounded-lg border p-3"
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-medium">Detected Tags</h3>
+                {selectedTag && (
+                  <button
+                    onClick={() => setSelectedTag(null)}
+                    className="text-xs text-blue-600 hover:underline"
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium text-sm">{tag.tag}</span>
-                      <span className={clsx(
-                        'text-xs px-2 py-0.5 rounded',
-                        tag.confidence >= 0.7 ? 'bg-green-100 text-green-700' :
-                        tag.confidence >= 0.5 ? 'bg-yellow-100 text-yellow-700' :
-                        'bg-gray-100 text-gray-700'
-                      )}>
-                        {(tag.confidence * 100).toFixed(0)}%
-                      </span>
-                    </div>
-                    <div className="mt-2 text-xs text-gray-500">
-                      <div>Patterns: {tag.pattern_matches}</div>
-                      <div>Semantic: {(tag.semantic_similarity * 100).toFixed(0)}%</div>
-                    </div>
-                  </div>
-                ))}
+                    Show all
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-gray-500 mb-3">Click a tag to highlight matches in text view</p>
+              <div className="space-y-2">
+                {tags.map((tag) => {
+                  const colorClass = TAG_COLORS[tag.area || ''] || DEFAULT_HIGHLIGHT_COLOR
+                  const isSelected = selectedTag === tag.tag
+                  const highlightCount = tag.highlights?.length || 0
+                  return (
+                    <button
+                      key={tag.tag}
+                      onClick={() => setSelectedTag(isSelected ? null : tag.tag)}
+                      className={clsx(
+                        'w-full text-left rounded-lg border p-3 transition-all',
+                        isSelected ? 'ring-2 ring-blue-500 border-blue-500' : 'hover:border-gray-300'
+                      )}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={clsx('w-3 h-3 rounded', colorClass.split(' ')[0])} />
+                          <span className="font-medium text-sm">{tag.tag}</span>
+                        </div>
+                        <span className={clsx(
+                          'text-xs px-2 py-0.5 rounded',
+                          tag.confidence >= 0.7 ? 'bg-green-100 text-green-700' :
+                          tag.confidence >= 0.5 ? 'bg-yellow-100 text-yellow-700' :
+                          'bg-gray-100 text-gray-700'
+                        )}>
+                          {(tag.confidence * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                      <div className="mt-2 text-xs text-gray-500 flex justify-between">
+                        <span>Matches: {highlightCount}</span>
+                        <span>Semantic: {(tag.semantic_similarity * 100).toFixed(0)}%</span>
+                      </div>
+                    </button>
+                  )
+                })}
               </div>
             </div>
           )}

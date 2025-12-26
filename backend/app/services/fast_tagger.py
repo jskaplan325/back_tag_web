@@ -171,6 +171,52 @@ def count_pattern_matches(text: str, patterns: List[str]) -> int:
     return total_matches
 
 
+def find_pattern_matches(text: str, patterns: List[str], max_matches: int = 50) -> List[Dict[str, Any]]:
+    """
+    Find pattern matches with their positions in text.
+    Returns list of {start, end, text, pattern} dicts for highlighting.
+    """
+    if not patterns:
+        return []
+
+    matches = []
+    for pattern in patterns:
+        try:
+            for match in re.finditer(pattern, text, re.IGNORECASE):
+                matches.append({
+                    'start': match.start(),
+                    'end': match.end(),
+                    'text': match.group(),
+                    'pattern': pattern
+                })
+                if len(matches) >= max_matches:
+                    break
+        except re.error:
+            # Invalid regex, try as literal
+            pattern_lower = pattern.lower()
+            text_lower = text.lower()
+            start = 0
+            while True:
+                pos = text_lower.find(pattern_lower, start)
+                if pos == -1:
+                    break
+                matches.append({
+                    'start': pos,
+                    'end': pos + len(pattern),
+                    'text': text[pos:pos + len(pattern)],
+                    'pattern': pattern
+                })
+                start = pos + 1
+                if len(matches) >= max_matches:
+                    break
+        if len(matches) >= max_matches:
+            break
+
+    # Sort by position and remove overlaps
+    matches.sort(key=lambda x: x['start'])
+    return matches[:max_matches]
+
+
 def compute_hybrid_confidence(
     semantic_score: float,
     pattern_matches: int,
@@ -259,6 +305,9 @@ def tag_text(
 
         # Accept if semantic passes threshold OR we have strong pattern matches
         if max_sim >= tag_threshold or pattern_matches >= 3:
+            # Find actual match positions for highlighting
+            highlights = find_pattern_matches(text, patterns, max_matches=20)
+
             matches.append({
                 'name': tag_name,
                 'tag_name': tag_name,  # Alias for compatibility
@@ -268,7 +317,8 @@ def tag_text(
                 'score': round(hybrid_confidence, 3),  # Alias
                 'semantic_similarity': round(max_sim, 3),
                 'pattern_matches': pattern_matches,
-                'evidence_chunk': chunks[best_chunk_idx][:300]
+                'evidence_chunk': chunks[best_chunk_idx][:300],
+                'highlights': highlights  # Match positions for UI highlighting
             })
 
     return sorted(matches, key=lambda x: x['confidence'], reverse=True)

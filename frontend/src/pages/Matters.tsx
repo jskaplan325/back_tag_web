@@ -16,7 +16,10 @@ import {
   ChevronDown,
   ChevronUp,
   Activity,
-  XCircle
+  XCircle,
+  Search,
+  CheckSquare,
+  Square
 } from 'lucide-react'
 import clsx from 'clsx'
 import api from '../api'
@@ -819,57 +822,148 @@ function BulkImportModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-function RetryButton({ matterId, count }: { matterId: string; count: number }) {
+interface FailedDoc {
+  id: string
+  filename: string
+  error_message: string
+}
+
+function ErrorDetailsModal({
+  matter,
+  onClose
+}: {
+  matter: MatterWithStats
+  onClose: () => void
+}) {
   const queryClient = useQueryClient()
+
+  const { data: failedDocs, isLoading } = useQuery<FailedDoc[]>({
+    queryKey: ['failed-docs', matter.id],
+    queryFn: () => api.get(`/api/matters/${matter.id}/failed-documents`).then(r => r.data),
+  })
+
   const retryMutation = useMutation({
-    mutationFn: () => api.post(`/api/matters/${matterId}/retry-failed`),
+    mutationFn: () => api.post(`/api/matters/${matter.id}/retry-failed`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['matters'] })
-      queryClient.invalidateQueries({ queryKey: ['failed-docs', matterId] })
+      queryClient.invalidateQueries({ queryKey: ['failed-docs', matter.id] })
+      onClose()
     },
   })
 
   return (
-    <button
-      onClick={(e) => {
-        e.preventDefault()
-        e.stopPropagation()
-        retryMutation.mutate()
-      }}
-      disabled={retryMutation.isPending}
-      className="flex items-center gap-1 px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
-    >
-      {retryMutation.isPending ? (
-        <Loader2 className="h-3 w-3 animate-spin" />
-      ) : (
-        <Play className="h-3 w-3" />
-      )}
-      Retry {count} failed
-    </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-lg rounded-lg bg-white shadow-xl mx-4 max-h-[80vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b">
+          <div className="flex items-center gap-3">
+            <div className="rounded-full bg-red-100 p-2">
+              <XCircle className="h-5 w-5 text-red-600" />
+            </div>
+            <div>
+              <h2 className="font-semibold">Failed Documents</h2>
+              <p className="text-sm text-gray-500">{matter.name}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-auto p-4">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+            </div>
+          ) : failedDocs && failedDocs.length > 0 ? (
+            <div className="space-y-3">
+              {failedDocs.map(doc => (
+                <div key={doc.id} className="bg-red-50 border border-red-100 rounded-lg p-3">
+                  <p className="font-medium text-sm text-gray-900 truncate" title={doc.filename}>
+                    {doc.filename}
+                  </p>
+                  <p className="mt-1 text-sm text-red-600 break-words">
+                    {doc.error_message || 'Unknown error'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-center text-gray-500 py-8">No failed documents</p>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between p-4 border-t bg-gray-50">
+          <p className="text-sm text-gray-500">
+            {failedDocs?.length || 0} document{(failedDocs?.length || 0) !== 1 ? 's' : ''} failed
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-gray-600 hover:text-gray-800"
+            >
+              Close
+            </button>
+            <button
+              onClick={() => retryMutation.mutate()}
+              disabled={retryMutation.isPending || !failedDocs?.length}
+              className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+            >
+              {retryMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Play className="h-4 w-4" />
+              )}
+              Retry All
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 
 function MatterCard({
   matter,
-  topTags
+  topTags,
+  isSelected,
+  onToggleSelect,
+  onShowErrors
 }: {
   matter: MatterWithStats
   topTags?: { tag: string; average_confidence: number }[]
+  isSelected?: boolean
+  onToggleSelect?: () => void
+  onShowErrors?: () => void
 }) {
-  const [showErrors, setShowErrors] = useState(false)
   const progress = matter.document_count > 0
     ? Math.round((matter.completed_count / matter.document_count) * 100)
     : 0
 
-  // Fetch failed documents when clicking on failed count
-  const { data: failedDocs } = useQuery<{ id: string; filename: string; error_message: string }[]>({
-    queryKey: ['failed-docs', matter.id],
-    queryFn: () => api.get(`/api/matters/${matter.id}/failed-documents`).then(r => r.data),
-    enabled: showErrors && matter.failed_count > 0,
-  })
-
   return (
-    <div className="rounded-lg bg-white p-4 shadow hover:shadow-md transition-shadow">
+    <div className={clsx(
+      'rounded-lg bg-white p-4 shadow hover:shadow-md transition-shadow relative',
+      isSelected && 'ring-2 ring-purple-500'
+    )}>
+      {/* Selection checkbox */}
+      {onToggleSelect && (
+        <button
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            onToggleSelect()
+          }}
+          className="absolute top-2 right-2 p-1 hover:bg-gray-100 rounded z-10"
+        >
+          {isSelected ? (
+            <CheckSquare className="h-5 w-5 text-purple-600" />
+          ) : (
+            <Square className="h-5 w-5 text-gray-400" />
+          )}
+        </button>
+      )}
       <Link to={`/matters/${matter.id}`}>
         <div className="flex items-start justify-between mb-3">
           <div className="flex-1 min-w-0">
@@ -908,7 +1002,7 @@ function MatterCard({
       </div>
 
       {/* Status */}
-      <div className="flex items-center gap-2 text-xs text-gray-500">
+      <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
         {matter.pending_count > 0 && (
           <span className="flex items-center gap-1">
             <Clock className="h-3 w-3" />
@@ -922,46 +1016,20 @@ function MatterCard({
           </span>
         )}
         {matter.failed_count > 0 && (
-          <div className="flex items-center gap-2">
-            <button
-              onClick={(e) => {
-                e.preventDefault()
-                setShowErrors(!showErrors)
-              }}
-              className="flex items-center gap-1 text-red-600 hover:text-red-800"
-              title="Click to see error details"
-            >
-              <XCircle className="h-3 w-3" />
-              {matter.failed_count} failed
-              {showErrors ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            </button>
-            <RetryButton matterId={matter.id} count={matter.failed_count} />
-          </div>
+          <button
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              onShowErrors?.()
+            }}
+            className="flex items-center gap-1 text-red-600 hover:text-red-800 hover:bg-red-50 px-1.5 py-0.5 rounded transition-colors"
+            title="Click to see error details"
+          >
+            <XCircle className="h-3 w-3" />
+            {matter.failed_count} failed
+          </button>
         )}
       </div>
-
-      {/* Error details */}
-      {showErrors && matter.failed_count > 0 && (
-        <div className="mt-2 p-2 bg-red-50 rounded text-xs">
-          {failedDocs ? (
-            <>
-              <ul className="space-y-1">
-                {failedDocs.slice(0, 3).map(doc => (
-                  <li key={doc.id} className="text-red-700">
-                    <span className="font-medium">{doc.filename}:</span>{' '}
-                    <span className="text-red-600">{doc.error_message?.slice(0, 80)}...</span>
-                  </li>
-                ))}
-                {failedDocs.length > 3 && (
-                  <li className="text-red-500">...and {failedDocs.length - 3} more</li>
-                )}
-              </ul>
-            </>
-          ) : (
-            <span className="text-red-600">Loading...</span>
-          )}
-        </div>
-      )}
 
       {/* Top tags */}
       {topTags && topTags.length > 0 && (
@@ -985,6 +1053,9 @@ export default function Matters() {
   const [processAllTarget, setProcessAllTarget] = useState<{ type: string | null, count: number } | null>(null)
   const [processingMode, setProcessingMode] = useState<'fast' | 'smart' | 'auto'>('auto')
   const [showStatusPanel, setShowStatusPanel] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selectedMatters, setSelectedMatters] = useState<Set<string>>(new Set())
+  const [errorMatter, setErrorMatter] = useState<MatterWithStats | null>(null)
   const queryClient = useQueryClient()
 
   // Fetch individual matters
@@ -1031,6 +1102,55 @@ export default function Matters() {
       setProcessAllTarget(null)
     },
   })
+
+  const processSelectedMutation = useMutation({
+    mutationFn: (matterIds: string[]) =>
+      api.post('/api/matters/process-selected', {
+        matter_ids: matterIds,
+        fast_mode: processingMode === 'fast',
+        smart_mode: processingMode === 'smart',
+        auto_mode: processingMode === 'auto'
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['matters'] })
+      queryClient.invalidateQueries({ queryKey: ['matter-stats'] })
+      setSelectedMatters(new Set())
+    },
+  })
+
+  // Filter matters based on search query
+  const filteredMatters = matters?.filter(m => {
+    if (!searchQuery) return true
+    const query = searchQuery.toLowerCase()
+    return (
+      m.name.toLowerCase().includes(query) ||
+      m.matter_type?.toLowerCase().includes(query)
+    )
+  })
+
+  // Toggle matter selection
+  const toggleSelection = (matterId: string) => {
+    setSelectedMatters(prev => {
+      const next = new Set(prev)
+      if (next.has(matterId)) {
+        next.delete(matterId)
+      } else {
+        next.add(matterId)
+      }
+      return next
+    })
+  }
+
+  // Select/deselect all filtered matters
+  const toggleSelectAll = () => {
+    if (!filteredMatters) return
+    const allSelected = filteredMatters.every(m => selectedMatters.has(m.id))
+    if (allSelected) {
+      setSelectedMatters(new Set())
+    } else {
+      setSelectedMatters(new Set(filteredMatters.map(m => m.id)))
+    }
+  }
 
   const totalStats = matters?.reduce(
     (acc, m) => ({
@@ -1132,6 +1252,47 @@ export default function Matters() {
         </div>
       </div>
 
+      {/* Search and Selection Controls */}
+      <div className="mb-6 flex items-center gap-4">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search matters by name or type..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          />
+        </div>
+
+        {filteredMatters && filteredMatters.length > 0 && (
+          <>
+            <button
+              onClick={toggleSelectAll}
+              className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"
+            >
+              <CheckSquare className="h-4 w-4" />
+              {filteredMatters.every(m => selectedMatters.has(m.id)) ? 'Deselect All' : 'Select All'}
+            </button>
+
+            {selectedMatters.size > 0 && (
+              <button
+                onClick={() => processSelectedMutation.mutate(Array.from(selectedMatters))}
+                disabled={processSelectedMutation.isPending}
+                className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+              >
+                {processSelectedMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Play className="h-4 w-4" />
+                )}
+                Process Selected ({selectedMatters.size})
+              </button>
+            )}
+          </>
+        )}
+      </div>
+
       {isLoading ? (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
@@ -1142,14 +1303,29 @@ export default function Matters() {
           <h3 className="mt-2 font-medium text-red-800">Failed to load matters</h3>
           <p className="mt-1 text-sm text-red-600">Make sure the backend is running</p>
         </div>
-      ) : matters && matters.length > 0 ? (
+      ) : filteredMatters && filteredMatters.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-          {matters.map((matter) => (
+          {filteredMatters.map((matter) => (
             <MatterCard
               key={matter.id}
               matter={matter}
+              isSelected={selectedMatters.has(matter.id)}
+              onToggleSelect={() => toggleSelection(matter.id)}
+              onShowErrors={() => setErrorMatter(matter)}
             />
           ))}
+        </div>
+      ) : searchQuery ? (
+        <div className="rounded-lg bg-gray-50 p-12 text-center">
+          <Search className="mx-auto h-12 w-12 text-gray-400" />
+          <h3 className="mt-4 text-lg font-medium">No matches found</h3>
+          <p className="mt-2 text-gray-500">Try a different search term</p>
+          <button
+            onClick={() => setSearchQuery('')}
+            className="mt-4 text-blue-600 hover:underline"
+          >
+            Clear search
+          </button>
         </div>
       ) : (
         <div className="rounded-lg bg-white p-12 shadow text-center">
@@ -1184,6 +1360,14 @@ export default function Matters() {
         isExpanded={showStatusPanel}
         onToggle={() => setShowStatusPanel(!showStatusPanel)}
       />
+
+      {/* Error Details Modal */}
+      {errorMatter && (
+        <ErrorDetailsModal
+          matter={errorMatter}
+          onClose={() => setErrorMatter(null)}
+        />
+      )}
     </div>
   )
 }

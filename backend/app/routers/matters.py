@@ -422,6 +422,36 @@ async def scan_folder(request: BulkImportRequest, db: Session = Depends(get_db))
     subfolders = []
     total_documents = 0
 
+    # Check if the scanned folder itself has direct files (single matter case)
+    direct_files_in_root = [f for f in folder_path.iterdir()
+                           if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS]
+
+    if direct_files_in_root:
+        # The scanned folder itself contains files - treat as single matter
+        doc_count = len(direct_files_in_root)
+        matter_type = infer_matter_type(folder_path.name)
+        folder_path_str = str(folder_path)
+        already_imported = folder_path_str in imported_paths
+
+        subfolders.append({
+            "name": folder_path.name,
+            "path": folder_path_str,
+            "document_count": doc_count,
+            "matter_type": matter_type,
+            "selected": not already_imported,
+            "already_imported": already_imported
+        })
+
+        if not already_imported:
+            total_documents = doc_count
+
+        return FolderScanResult(
+            folder_path=str(folder_path),
+            subfolders=subfolders,
+            total_documents=total_documents
+        )
+
+    # Otherwise, scan subdirectories
     for item in sorted(folder_path.iterdir()):
         if item.is_dir() and not item.name.startswith('.'):
             # Check if this folder has direct files or only subfolders
@@ -554,18 +584,27 @@ async def bulk_import(
 
 def infer_matter_type(folder_name: str) -> str:
     """
-    Infer matter type from folder name.
-
-    TODO: This is a placeholder. In the future, this will be populated from
-    an internal MatterDB that maps matter IDs to their Area of Law.
-
-    For now, returns 'TBD' since matter names are typically numeric IDs
-    like "Matter3323242" that don't indicate the practice area.
+    Infer matter type from folder name using pattern matching.
     """
-    # Future: Query MatterDB to get the actual Area of Law for this matter ID
-    # matter_info = matter_db.lookup(folder_name)
-    # if matter_info:
-    #     return matter_info.area_of_law
+    name_lower = folder_name.lower().replace('_', ' ').replace('-', ' ')
+
+    # Pattern matching for common folder naming conventions
+    patterns = {
+        'M&A / Corporate': ['m and a', 'm&a', 'merger', 'acquisition', 'corporate'],
+        'Securities / Capital Markets': ['securities', 'capital market', 'ipo', 'sec filing', 'finance'],
+        'Investment Funds': ['fund', 'investment', 'private equity', 'venture', 'lp agreement'],
+        'Litigation': ['litigation', 'dispute', 'lawsuit', 'complaint', 'settlement'],
+        'Real Estate': ['real estate', 'property', 'lease', 'mortgage', 'realty'],
+        'Employment': ['employment', 'labor', 'hr', 'employee', 'workforce'],
+        'Intellectual Property': ['ip', 'patent', 'trademark', 'copyright', 'ip licensing'],
+        'Regulatory / Compliance': ['regulatory', 'compliance', 'government', 'agency'],
+        'Commercial': ['commercial', 'contract', 'agreement', 'vendor', 'supplier'],
+    }
+
+    for matter_type, keywords in patterns.items():
+        for keyword in keywords:
+            if keyword in name_lower:
+                return matter_type
 
     return 'TBD'
 
@@ -1113,4 +1152,86 @@ async def process_batch(
         "document_ids": [d[0] for d in doc_info],
         "mode": mode_msg,
         "message": f"Queued {len(doc_info)} documents for {mode_msg} processing"
+    }
+
+
+class ProcessSelectedRequest(BaseModel):
+    matter_ids: List[str]
+    only_pending: bool = True
+    fast_mode: bool = True
+    smart_mode: bool = False
+    auto_mode: bool = False
+
+
+@router.post("/process-selected")
+async def process_selected_matters(
+    request: ProcessSelectedRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """Queue processing of documents from selected matters."""
+    if not request.matter_ids:
+        return {
+            "queued": 0,
+            "message": "No matters selected"
+        }
+
+    # Get documents from selected matters
+    query = db.query(Document).filter(Document.matter_id.in_(request.matter_ids))
+
+    if request.only_pending:
+        query = query.filter(Document.status == "uploaded")
+    else:
+        query = query.filter(Document.status != "processing")
+
+    documents = query.all()
+
+    if not documents:
+        return {
+            "queued": 0,
+            "message": "No documents to process in selected matters"
+        }
+
+    # Collect document info
+    doc_info = [(doc.id, doc.filepath, doc.recommended_pipeline or 'fast') for doc in documents]
+
+    # Mark all as processing
+    for doc in documents:
+        doc.status = "processing"
+    db.commit()
+
+    # Choose pipeline based on mode
+    if request.auto_mode:
+        pipeline_counts = {'fast': 0, 'zone': 0, 'vision': 0, 'ocr': 0, 'smart': 0}
+        for doc_id, filepath, recommended in doc_info:
+            background_tasks.add_task(run_auto_pipeline, doc_id, filepath, recommended)
+            pipeline_counts[recommended] = pipeline_counts.get(recommended, 0) + 1
+        mode_msg = f"auto ({', '.join(f'{k}:{v}' for k,v in pipeline_counts.items() if v > 0)})"
+    elif request.smart_mode:
+        for doc_id, filepath, _ in doc_info:
+            background_tasks.add_task(run_smart_pipeline, doc_id, filepath)
+        mode_msg = "smart LLM-based (Gemini)"
+    elif request.fast_mode:
+        for doc_id, filepath, _ in doc_info:
+            background_tasks.add_task(run_fast_pipeline, doc_id, filepath)
+        mode_msg = "fast text-only"
+    else:
+        from ..routers.documents import run_pipeline
+        semantic_model = "pile-of-law/legalbert-large-1.7M-2"
+        enable_vision = False
+        vision_model = "microsoft/Florence-2-base"
+
+        for doc_id, filepath, _ in doc_info:
+            background_tasks.add_task(
+                run_pipeline, doc_id, filepath,
+                semantic_model, enable_vision, vision_model
+            )
+        mode_msg = "full pipeline"
+
+    return {
+        "queued": len(doc_info),
+        "matter_count": len(request.matter_ids),
+        "document_ids": [d[0] for d in doc_info],
+        "mode": mode_msg,
+        "message": f"Queued {len(doc_info)} documents from {len(request.matter_ids)} matters for {mode_msg} processing"
     }

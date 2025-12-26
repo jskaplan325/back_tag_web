@@ -115,6 +115,15 @@ class Model(Base):
     license = Column(String(100))
     last_updated = Column(DateTime)
 
+    # Extended model card info
+    architecture = Column(Text)  # Model architecture description
+    intended_use = Column(Text)  # Intended use cases
+    limitations = Column(Text)  # Known limitations
+    bias_risks = Column(Text)  # Bias and fairness concerns
+    training_data = Column(Text)  # Training data description
+    evaluation = Column(Text)  # Evaluation results/metrics
+    model_card_json = Column(Text)  # Full model card as JSON
+
     # Approval workflow
     approved = Column(Boolean, default=False)
     approved_by = Column(String(100), nullable=True)
