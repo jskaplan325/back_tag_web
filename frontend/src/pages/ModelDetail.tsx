@@ -22,6 +22,22 @@ import {
 import clsx from 'clsx'
 import api from '../api'
 
+function getModelSourceInfo(url: string | null, name: string): { href: string; label: string; siteName: string } {
+  if (!url) {
+    return { href: `https://huggingface.co/${name}`, label: 'View full model card on HuggingFace', siteName: 'HuggingFace' }
+  }
+  if (url.includes('github.com')) {
+    return { href: url, label: 'View repository on GitHub', siteName: 'GitHub' }
+  }
+  if (url.includes('ai.google.dev') || url.includes('google.com')) {
+    return { href: url, label: 'View documentation on Google AI', siteName: 'Google AI' }
+  }
+  if (url.includes('openai.com')) {
+    return { href: url, label: 'View documentation on OpenAI', siteName: 'OpenAI' }
+  }
+  return { href: url, label: 'View full model card on HuggingFace', siteName: 'HuggingFace' }
+}
+
 interface ModelCardDetail {
   id: string
   name: string
@@ -405,33 +421,41 @@ export default function ModelDetail() {
         {/* No content fallback */}
         {!model.executive_summary && !model.intended_uses && !model.limitations && (
           <div className="text-center py-12 bg-gray-50 rounded-lg">
-            <p className="text-gray-500">No detailed model card available from HuggingFace.</p>
-            <a
-              href={model.huggingface_url || '#'}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 mt-4 text-blue-600 hover:underline"
-            >
-              View on HuggingFace
-              <ExternalLink className="h-4 w-4" />
-            </a>
+            <p className="text-gray-500">No detailed model card available.</p>
+            {(() => {
+              const sourceInfo = getModelSourceInfo(model.huggingface_url, model.name)
+              return (
+                <a
+                  href={sourceInfo.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 mt-4 text-blue-600 hover:underline"
+                >
+                  View on {sourceInfo.siteName}
+                  <ExternalLink className="h-4 w-4" />
+                </a>
+              )
+            })()}
           </div>
         )}
       </div>
 
-      {/* HuggingFace Link */}
+      {/* Model Source Link */}
       <div className="mt-8 pt-6 border-t">
-        <a
-          href={model.huggingface_url?.startsWith('http')
-            ? model.huggingface_url
-            : `https://huggingface.co/${model.name}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-2 text-blue-600 hover:underline"
-        >
-          View full model card on HuggingFace
-          <ExternalLink className="h-4 w-4" />
-        </a>
+        {(() => {
+          const sourceInfo = getModelSourceInfo(model.huggingface_url, model.name)
+          return (
+            <a
+              href={sourceInfo.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 text-blue-600 hover:underline"
+            >
+              {sourceInfo.label}
+              <ExternalLink className="h-4 w-4" />
+            </a>
+          )
+        })()}
       </div>
     </div>
   )

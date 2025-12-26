@@ -16,6 +16,22 @@ import {
 import clsx from 'clsx'
 import api from '../api'
 
+function getModelSourceInfo(url: string | null, name: string): { href: string; label: string } {
+  if (!url) {
+    return { href: `https://huggingface.co/${name}`, label: 'View on HuggingFace' }
+  }
+  if (url.includes('github.com')) {
+    return { href: url, label: 'View on GitHub' }
+  }
+  if (url.includes('ai.google.dev') || url.includes('google.com')) {
+    return { href: url, label: 'View Google AI Docs' }
+  }
+  if (url.includes('openai.com')) {
+    return { href: url, label: 'View OpenAI Docs' }
+  }
+  return { href: url, label: 'View on HuggingFace' }
+}
+
 interface Model {
   id: string
   name: string
@@ -212,17 +228,20 @@ function ModelCard({ model, onApprove }: { model: Model; onApprove: (id: string)
       </div>
 
       <div className="mt-4 flex items-center gap-3">
-        <a
-          href={model.huggingface_url?.startsWith('http')
-            ? model.huggingface_url
-            : `https://huggingface.co/${model.name}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-1 text-sm text-blue-600 hover:underline"
-        >
-          <ExternalLink className="h-4 w-4" />
-          View on HuggingFace
-        </a>
+        {(() => {
+          const sourceInfo = getModelSourceInfo(model.huggingface_url, model.name)
+          return (
+            <a
+              href={sourceInfo.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 text-sm text-blue-600 hover:underline"
+            >
+              <ExternalLink className="h-4 w-4" />
+              {sourceInfo.label}
+            </a>
+          )
+        })()}
         {!model.approved && (
           <button
             onClick={() => onApprove(model.id)}
