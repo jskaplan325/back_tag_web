@@ -23,6 +23,24 @@ UPLOADS_DIR = DATA_DIR / "uploads"
 SUPPORTED_EXTENSIONS = {'.pdf', '.txt', '.doc', '.docx'}
 
 
+def compute_weighted_avg(values: List[float], min_threshold: float = 0.5) -> Optional[float]:
+    """
+    Compute weighted average, filtering out low values.
+    Uses sum(v²)/sum(v) weighting - higher values count more.
+    """
+    if not values:
+        return None
+
+    valid = [v for v in values if v >= min_threshold]
+    if not valid:
+        # Nothing passes threshold - return simple avg (indicates problem)
+        return round(sum(values) / len(values), 3)
+
+    sum_sq = sum(v * v for v in valid)
+    sum_v = sum(valid)
+    return round(sum_sq / sum_v, 3)
+
+
 # Pydantic schemas
 class MatterResponse(BaseModel):
     id: str
@@ -117,17 +135,15 @@ async def list_matters(
         completed = sum(1 for d in docs if d.status == 'completed')
         failed = sum(1 for d in docs if d.status == 'failed')
 
-        # Calculate average confidence from completed documents
-        total_confidence = 0
-        confidence_count = 0
+        # Calculate weighted average confidence from completed documents
+        doc_confidences = []
         for doc in docs:
             if doc.status == 'completed':
                 doc_result = db.query(Result).filter(Result.document_id == doc.id).order_by(Result.processed_at.desc()).first()
                 if doc_result and doc_result.average_confidence:
-                    total_confidence += doc_result.average_confidence
-                    confidence_count += 1
+                    doc_confidences.append(doc_result.average_confidence)
 
-        avg_confidence = round(total_confidence / confidence_count, 3) if confidence_count > 0 else None
+        avg_confidence = compute_weighted_avg(doc_confidences)
 
         result.append(MatterResponse(
             id=matter.id,
@@ -293,18 +309,17 @@ async def get_matter_tags(matter_id: str, limit: int = 5, db: Session = Depends(
 
                 if name:
                     if name not in tag_scores:
-                        tag_scores[name] = {'total_score': 0, 'count': 0}
-                    tag_scores[name]['total_score'] += score
-                    tag_scores[name]['count'] += 1
+                        tag_scores[name] = {'scores': []}
+                    tag_scores[name]['scores'].append(score)
 
-    # Calculate average scores and sort
+    # Calculate weighted average scores and sort
     aggregated = []
     for name, data in tag_scores.items():
-        avg_score = data['total_score'] / data['count'] if data['count'] > 0 else 0
+        avg_score = compute_weighted_avg(data['scores']) or 0
         aggregated.append({
             'tag': name,
             'average_confidence': avg_score,
-            'document_count': data['count']
+            'document_count': len(data['scores'])
         })
 
     # Sort by count first, then by confidence
@@ -692,8 +707,7 @@ async def get_stats_by_type(db: Session = Depends(get_db)):
                 "processing_count": 0,
                 "completed_count": 0,
                 "failed_count": 0,
-                "total_confidence": 0,
-                "confidence_count": 0
+                "confidences": []
             }
 
         stats_by_type[matter_type]["matter_count"] += 1
@@ -711,15 +725,14 @@ async def get_stats_by_type(db: Session = Depends(get_db)):
                 # Get confidence for completed documents
                 result = db.query(Result).filter(Result.document_id == doc.id).order_by(Result.processed_at.desc()).first()
                 if result and result.average_confidence:
-                    stats_by_type[matter_type]["total_confidence"] += result.average_confidence
-                    stats_by_type[matter_type]["confidence_count"] += 1
+                    stats_by_type[matter_type]["confidences"].append(result.average_confidence)
             elif doc.status == "failed":
                 stats_by_type[matter_type]["failed_count"] += 1
 
-    # Calculate average confidence and clean up
+    # Calculate weighted average confidence and clean up
     result_list = []
     for stats in stats_by_type.values():
-        avg_confidence = (stats["total_confidence"] / stats["confidence_count"]) if stats["confidence_count"] > 0 else None
+        avg_confidence = compute_weighted_avg(stats["confidences"])
         result_list.append({
             "matter_type": stats["matter_type"],
             "matter_count": stats["matter_count"],
@@ -728,7 +741,7 @@ async def get_stats_by_type(db: Session = Depends(get_db)):
             "processing_count": stats["processing_count"],
             "completed_count": stats["completed_count"],
             "failed_count": stats["failed_count"],
-            "average_confidence": round(avg_confidence, 3) if avg_confidence else None
+            "average_confidence": avg_confidence
         })
 
     return result_list

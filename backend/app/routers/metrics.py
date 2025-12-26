@@ -14,6 +14,16 @@ from ..database.db import get_db, Document, Result, Model, ModelUsage, APICost, 
 router = APIRouter()
 
 
+def compute_weighted_avg(values: List[float], min_threshold: float = 0.5) -> float:
+    """Compute weighted average, filtering out low values."""
+    if not values:
+        return 0.0
+    valid = [v for v in values if v and v >= min_threshold]
+    if not valid:
+        return sum(v or 0 for v in values) / len(values)
+    return sum(v * v for v in valid) / sum(valid)
+
+
 @router.get("/matter-types")
 async def get_matter_types(db: Session = Depends(get_db)):
     """Get list of available matter types for filtering."""
@@ -80,7 +90,8 @@ async def get_dashboard_summary(
         results = db.query(Result).all()
 
     if results:
-        avg_confidence = sum(r.average_confidence or 0 for r in results) / len(results)
+        confidences = [r.average_confidence for r in results if r.average_confidence]
+        avg_confidence = compute_weighted_avg(confidences)
         avg_time = sum(r.processing_time_seconds or 0 for r in results) / len(results)
         total_tags = sum(r.tag_count or 0 for r in results)
     else:
@@ -127,11 +138,12 @@ async def get_processing_trends(
             trends_by_date[date_str] = {
                 "count": 0,
                 "total_time": 0,
-                "total_confidence": 0
+                "confidences": []
             }
         trends_by_date[date_str]["count"] += 1
         trends_by_date[date_str]["total_time"] += result.processing_time_seconds or 0
-        trends_by_date[date_str]["total_confidence"] += result.average_confidence or 0
+        if result.average_confidence:
+            trends_by_date[date_str]["confidences"].append(result.average_confidence)
 
     # Convert to list
     trends = []
@@ -141,7 +153,7 @@ async def get_processing_trends(
             date=date_str,
             documents_processed=data["count"],
             avg_processing_time=round(data["total_time"] / data["count"], 2) if data["count"] > 0 else 0,
-            avg_confidence=round(data["total_confidence"] / data["count"], 3) if data["count"] > 0 else 0
+            avg_confidence=round(compute_weighted_avg(data["confidences"]), 3)
         ))
 
     return trends

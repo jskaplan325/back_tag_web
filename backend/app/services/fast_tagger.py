@@ -121,6 +121,37 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
 
 
+def compute_weighted_confidence(
+    tags: List[Dict],
+    min_threshold: float = 0.5
+) -> float:
+    """
+    Compute weighted average confidence, filtering out low-confidence tags.
+
+    - Filters out tags below min_threshold (these indicate taxonomy issues or wrong matches)
+    - Applies weighted average: sum(c²) / sum(c) - higher scores count more
+
+    Example: [0.9, 0.85, 0.6, 0.3] with threshold 0.5
+      → filters to [0.9, 0.85, 0.6]
+      → weighted: (0.81 + 0.72 + 0.36) / (0.9 + 0.85 + 0.6) = 0.804
+    """
+    if not tags:
+        return 0.0
+
+    # Filter to tags above threshold
+    valid_scores = [t['confidence'] for t in tags if t['confidence'] >= min_threshold]
+
+    if not valid_scores:
+        # If nothing passes threshold, return simple average of all (indicates problem)
+        return sum(t['confidence'] for t in tags) / len(tags)
+
+    # Weighted average: sum(c²) / sum(c)
+    sum_squared = sum(c * c for c in valid_scores)
+    sum_scores = sum(valid_scores)
+
+    return round(sum_squared / sum_scores, 3)
+
+
 def count_pattern_matches(text: str, patterns: List[str]) -> int:
     """Count how many pattern matches are found in text."""
     if not patterns:
@@ -286,7 +317,7 @@ def process_document_fast(
         'tag_count': len(tags),
         'word_count': word_count,
         'processing_time_seconds': processing_time,
-        'average_confidence': sum(t['confidence'] for t in tags) / len(tags) if tags else 0,
+        'average_confidence': compute_weighted_confidence(tags),
         'method': 'fast_text_only',
         'model': model_name
     }
