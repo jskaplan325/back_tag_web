@@ -804,11 +804,15 @@ def run_fast_pipeline(document_id: str, filepath: str):
     try:
         result_data = process_document_fast(filepath, db)
 
+        # Check processing status from quality validation
+        doc_status = result_data.get('status', 'processed')
+        status_reason = result_data.get('status_reason', '')
+
         # Get model name from result or default
         model_name = result_data.get('model', 'pile-of-law/legalbert-large-1.7M-2')
         processing_time = result_data.get('processing_time_seconds', 0)
 
-        # Create result record
+        # Create result record (even for skipped/failed - for audit trail)
         result_id = str(uuid.uuid4())
         result = Result(
             id=result_id,
@@ -818,40 +822,50 @@ def run_fast_pipeline(document_id: str, filepath: str):
             vision_model=None,
             vision_enabled=False,
             tag_count=result_data.get('tag_count', 0),
-            average_confidence=result_data.get('average_confidence', 0),
+            average_confidence=result_data.get('average_confidence', 0) if doc_status == 'processed' else None,
             result_json=result_data,
             visual_pages=None
         )
         db.add(result)
 
-        # Get or create model in registry
-        model = db.query(Model).filter(Model.name == model_name).first()
-        if not model:
-            model = Model(
+        # Only track model usage for successfully processed documents
+        if doc_status == 'processed':
+            # Get or create model in registry
+            model = db.query(Model).filter(Model.name == model_name).first()
+            if not model:
+                model = Model(
+                    id=str(uuid.uuid4()),
+                    name=model_name,
+                    type='semantic',
+                    huggingface_url=f'https://huggingface.co/{model_name}',
+                    approved=True  # Auto-approve models used in processing
+                )
+                db.add(model)
+                db.flush()  # Get model.id
+
+            # Create model usage record
+            model_usage = ModelUsage(
                 id=str(uuid.uuid4()),
-                name=model_name,
-                type='semantic',
-                huggingface_url=f'https://huggingface.co/{model_name}',
-                approved=True  # Auto-approve models used in processing
+                model_id=model.id,
+                result_id=result_id,
+                processing_time_seconds=processing_time
             )
-            db.add(model)
-            db.flush()  # Get model.id
+            db.add(model_usage)
 
-        # Create model usage record
-        model_usage = ModelUsage(
-            id=str(uuid.uuid4()),
-            model_id=model.id,
-            result_id=result_id,
-            processing_time_seconds=processing_time
-        )
-        db.add(model_usage)
-
-        # Update document
+        # Update document based on processing status
         document = db.query(Document).filter(Document.id == document_id).first()
         if document:
-            document.status = "completed"
-            document.word_count = result_data.get('word_count')
-            document.page_count = 1  # Text-based
+            if doc_status == 'processed':
+                document.status = "completed"
+                document.word_count = result_data.get('word_count')
+                document.page_count = 1  # Text-based
+                document.error_message = None
+            elif doc_status == 'skipped':
+                document.status = "skipped"
+                document.error_message = status_reason
+            else:  # failed
+                document.status = "failed"
+                document.error_message = status_reason
 
         db.commit()
 

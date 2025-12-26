@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { FileText, CheckCircle, TrendingUp, Clock, Tag, Filter, X } from 'lucide-react'
+import { FileText, CheckCircle, TrendingUp, Clock, Tag, Filter, X, AlertTriangle, SkipForward } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { Link } from 'react-router-dom'
 import api from '../api'
@@ -8,6 +8,7 @@ import api from '../api'
 interface DashboardSummary {
   total_documents: number
   total_processed: number
+  total_skipped: number
   total_failed: number
   avg_confidence: number
   avg_processing_time: number
@@ -108,7 +109,7 @@ export default function Dashboard() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
         <StatCard
           title="Total Documents"
           value={summary?.total_documents ?? 0}
@@ -122,13 +123,25 @@ export default function Dashboard() {
           color="bg-green-500"
         />
         <StatCard
+          title="Skipped"
+          value={summary?.total_skipped ?? 0}
+          icon={SkipForward}
+          color="bg-gray-400"
+        />
+        <StatCard
+          title="Failed"
+          value={summary?.total_failed ?? 0}
+          icon={AlertTriangle}
+          color="bg-red-500"
+        />
+        <StatCard
           title="Avg Confidence"
           value={`${((summary?.avg_confidence ?? 0) * 100).toFixed(1)}%`}
           icon={TrendingUp}
           color="bg-purple-500"
         />
         <StatCard
-          title="Avg Processing Time"
+          title="Avg Time"
           value={`${(summary?.avg_processing_time ?? 0).toFixed(0)}s`}
           icon={Clock}
           color="bg-orange-500"

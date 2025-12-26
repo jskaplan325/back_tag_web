@@ -10,8 +10,110 @@ import re
 import time
 import numpy as np
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 from sentence_transformers import SentenceTransformer
+
+
+# Supported document types for legal document processing
+SUPPORTED_EXTENSIONS = {
+    '.pdf', '.txt', '.doc', '.docx', '.rtf',
+    '.htm', '.html',  # May contain embedded documents
+}
+
+# Explicitly unsupported - skip without error
+SKIP_EXTENSIONS = {
+    '.css', '.js', '.json', '.xml', '.yaml', '.yml',
+    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg',
+    '.zip', '.tar', '.gz', '.rar',
+    '.exe', '.dll', '.so', '.bin',
+    '.mp3', '.mp4', '.wav', '.avi',
+    '.xls', '.xlsx', '.ppt', '.pptx',  # Could add support later
+}
+
+
+class DocumentQualityResult:
+    """Result of document quality validation."""
+    def __init__(self, is_valid: bool, status: str, reason: str = ""):
+        self.is_valid = is_valid
+        self.status = status  # 'processed', 'skipped', 'failed'
+        self.reason = reason
+
+
+def check_file_type(filepath: str) -> DocumentQualityResult:
+    """Check if file type is supported for processing."""
+    ext = Path(filepath).suffix.lower()
+
+    if ext in SUPPORTED_EXTENSIONS:
+        return DocumentQualityResult(True, 'processed')
+    elif ext in SKIP_EXTENSIONS:
+        return DocumentQualityResult(False, 'skipped', f'Unsupported file type: {ext}')
+    else:
+        # Unknown extension - try to process but may fail
+        return DocumentQualityResult(True, 'processed', f'Unknown file type: {ext}')
+
+
+def validate_text_quality(text: str, min_words: int = 30) -> DocumentQualityResult:
+    """
+    Validate extracted text quality to detect:
+    - Binary/encoded content (base64, MIME)
+    - Scrambled/corrupted text
+    - Insufficient text content
+    - Non-prose content (code, CSS, etc.)
+    """
+    if not text or not text.strip():
+        return DocumentQualityResult(False, 'failed', 'No text content extracted')
+
+    # Check word count
+    words = text.split()
+    word_count = len(words)
+
+    if word_count < min_words:
+        return DocumentQualityResult(False, 'failed', f'Insufficient text: {word_count} words (min: {min_words})')
+
+    # Sample text for quality checks (first 2000 chars)
+    sample = text[:2000]
+
+    # Check for binary/encoded content
+    # High ratio of non-printable or special characters indicates binary
+    special_chars = sum(1 for c in sample if not c.isprintable() or c in '\\@#$%^&*+=|~`')
+    special_ratio = special_chars / len(sample) if sample else 0
+
+    if special_ratio > 0.15:
+        return DocumentQualityResult(False, 'failed', f'Binary/encoded content detected ({special_ratio:.0%} special chars)')
+
+    # Check for base64/MIME patterns
+    base64_pattern = r'[A-Za-z0-9+/=]{50,}'
+    if len(re.findall(base64_pattern, sample)) > 3:
+        return DocumentQualityResult(False, 'failed', 'Base64/MIME encoded content detected')
+
+    # Check for scrambled text (repeating escape sequences, hex patterns)
+    scramble_patterns = [
+        r'\\[A-Z][0-9]{2,}',  # \M4$ style
+        r'[A-Z0-9]{2,}\\',    # Backslash heavy
+        r'[\x00-\x1f]{3,}',   # Control characters
+    ]
+    scramble_matches = sum(len(re.findall(p, sample)) for p in scramble_patterns)
+    if scramble_matches > 10:
+        return DocumentQualityResult(False, 'failed', 'Scrambled/corrupted text detected')
+
+    # Check for code/CSS content
+    code_indicators = [
+        r'\{\s*[a-z-]+\s*:\s*[^}]+\}',  # CSS rules
+        r'function\s*\([^)]*\)\s*\{',    # JavaScript
+        r'import\s+[\w.]+',              # Python/Java imports
+        r'<\?(?:php|xml)',               # PHP/XML
+    ]
+    code_matches = sum(len(re.findall(p, sample, re.IGNORECASE)) for p in code_indicators)
+    if code_matches > 5:
+        return DocumentQualityResult(False, 'skipped', 'Code/markup content detected (not a legal document)')
+
+    # Check for reasonable prose (sentences, punctuation)
+    sentence_endings = len(re.findall(r'[.!?]\s', sample))
+    if word_count > 100 and sentence_endings < 3:
+        # Lots of words but no sentences - might be garbage
+        return DocumentQualityResult(False, 'failed', 'No sentence structure detected')
+
+    return DocumentQualityResult(True, 'processed')
 
 # Singleton model instance
 _model: Optional[SentenceTransformer] = None
@@ -333,25 +435,71 @@ def process_document_fast(
     """
     Process a document using fast text-only tagging.
 
-    Returns a result dict compatible with the existing pipeline format.
+    Returns a result dict with status field:
+    - 'processed': Successfully tagged (confidence is meaningful)
+    - 'skipped': Unsupported file type (not included in metrics)
+    - 'failed': Extraction/quality issue (shown as error)
     """
     global _tag_embeddings, _tag_metadata
 
     start_time = time.time()
 
-    # Get model
+    # Step 1: Check file type
+    file_check = check_file_type(filepath)
+    if not file_check.is_valid:
+        return {
+            'tags': [],
+            'tag_count': 0,
+            'word_count': 0,
+            'processing_time_seconds': time.time() - start_time,
+            'average_confidence': 0,
+            'method': 'fast_text_only',
+            'model': model_name,
+            'status': file_check.status,
+            'status_reason': file_check.reason
+        }
+
+    # Step 2: Extract text
+    try:
+        text = extract_text(filepath)
+    except Exception as e:
+        return {
+            'tags': [],
+            'tag_count': 0,
+            'word_count': 0,
+            'processing_time_seconds': time.time() - start_time,
+            'average_confidence': 0,
+            'method': 'fast_text_only',
+            'model': model_name,
+            'status': 'failed',
+            'status_reason': f'Text extraction failed: {str(e)[:100]}'
+        }
+
+    # Step 3: Validate text quality
+    quality_check = validate_text_quality(text)
+    if not quality_check.is_valid:
+        return {
+            'tags': [],
+            'tag_count': 0,
+            'word_count': len(text.split()) if text else 0,
+            'processing_time_seconds': time.time() - start_time,
+            'average_confidence': 0,
+            'method': 'fast_text_only',
+            'model': model_name,
+            'status': quality_check.status,
+            'status_reason': quality_check.reason
+        }
+
+    word_count = len(text.split())
+
+    # Step 4: Get model and taxonomy
     model = get_model(model_name)
 
-    # Load taxonomy if not cached
     if not _tag_metadata:
         _tag_metadata = load_taxonomy_tags(db_session)
         _tag_embeddings = compute_tag_embeddings(_tag_metadata, model)
 
-    # Extract text
-    text = extract_text(filepath)
-    word_count = len(text.split())
-
-    # Tag text
+    # Step 5: Tag text
     tags = tag_text(
         text,
         model,
@@ -369,7 +517,9 @@ def process_document_fast(
         'processing_time_seconds': processing_time,
         'average_confidence': compute_weighted_confidence(tags),
         'method': 'fast_text_only',
-        'model': model_name
+        'model': model_name,
+        'status': 'processed',
+        'status_reason': ''
     }
 
 

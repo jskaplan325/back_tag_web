@@ -34,8 +34,9 @@ async def get_matter_types(db: Session = Depends(get_db)):
 class DashboardSummary(BaseModel):
     total_documents: int
     total_processed: int
-    total_failed: int
-    avg_confidence: float
+    total_skipped: int  # Unsupported file types
+    total_failed: int   # Corrupted/unreadable
+    avg_confidence: float  # Only from successfully processed docs
     avg_processing_time: float
     total_tags_detected: int
     models_registered: int
@@ -79,18 +80,23 @@ async def get_dashboard_summary(
 
     total_docs = doc_query.count()
     completed = doc_query.filter(Document.status == "completed").count()
+    skipped = doc_query.filter(Document.status == "skipped").count()
     failed = doc_query.filter(Document.status == "failed").count()
 
     # Get average confidence and processing time from results
+    # Only include results from completed documents (not skipped/failed)
     if matter_type:
-        # Get document IDs for this matter type
-        doc_ids = [d.id for d in doc_query.all()]
-        results = db.query(Result).filter(Result.document_id.in_(doc_ids)).all() if doc_ids else []
+        # Get document IDs for completed documents of this matter type
+        completed_doc_ids = [d.id for d in doc_query.filter(Document.status == "completed").all()]
+        results = db.query(Result).filter(Result.document_id.in_(completed_doc_ids)).all() if completed_doc_ids else []
     else:
-        results = db.query(Result).all()
+        # Get results only for completed documents
+        completed_doc_ids = [d.id for d in db.query(Document).filter(Document.status == "completed").all()]
+        results = db.query(Result).filter(Result.document_id.in_(completed_doc_ids)).all() if completed_doc_ids else []
 
     if results:
-        confidences = [r.average_confidence for r in results if r.average_confidence]
+        # Only include non-null confidence values
+        confidences = [r.average_confidence for r in results if r.average_confidence is not None and r.average_confidence > 0]
         avg_confidence = compute_weighted_avg(confidences)
         avg_time = sum(r.processing_time_seconds or 0 for r in results) / len(results)
         total_tags = sum(r.tag_count or 0 for r in results)
@@ -105,6 +111,7 @@ async def get_dashboard_summary(
     return DashboardSummary(
         total_documents=total_docs,
         total_processed=completed,
+        total_skipped=skipped,
         total_failed=failed,
         avg_confidence=round(avg_confidence, 3),
         avg_processing_time=round(avg_time, 2),
