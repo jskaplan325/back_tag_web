@@ -54,6 +54,7 @@ class DocumentInMatter(BaseModel):
     uploaded_at: datetime
     file_size_bytes: Optional[int]
     recommended_pipeline: Optional[str] = None
+    average_confidence: Optional[float] = None
 
     class Config:
         from_attributes = True
@@ -168,11 +169,27 @@ async def create_matter(
 @router.get("/{matter_id}", response_model=MatterDetailResponse)
 async def get_matter(matter_id: str, db: Session = Depends(get_db)):
     """Get a specific matter with its documents."""
+    from ..database.db import Result
+
     matter = db.query(Matter).filter(Matter.id == matter_id).first()
     if not matter:
         raise HTTPException(status_code=404, detail="Matter not found")
 
     documents = db.query(Document).filter(Document.matter_id == matter_id).all()
+
+    # Get confidence for each document from results
+    doc_list = []
+    for doc in documents:
+        result = db.query(Result).filter(Result.document_id == doc.id).order_by(Result.processed_at.desc()).first()
+        doc_list.append({
+            "id": doc.id,
+            "filename": doc.filename,
+            "status": doc.status,
+            "uploaded_at": doc.uploaded_at,
+            "file_size_bytes": doc.file_size_bytes,
+            "recommended_pipeline": doc.recommended_pipeline,
+            "average_confidence": result.average_confidence if result else None
+        })
 
     return {
         "id": matter.id,
@@ -182,7 +199,7 @@ async def get_matter(matter_id: str, db: Session = Depends(get_db)):
         "source_path": matter.source_path,
         "created_at": matter.created_at,
         "document_count": len(documents),
-        "documents": documents
+        "documents": doc_list
     }
 
 

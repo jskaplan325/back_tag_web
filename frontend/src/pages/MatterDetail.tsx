@@ -22,7 +22,7 @@ interface DocumentInMatter {
   status: string
   uploaded_at: string
   file_size_bytes: number | null
-  word_count?: number | null
+  average_confidence?: number | null
 }
 
 interface MatterTag {
@@ -118,8 +118,19 @@ function DocumentRow({ doc, matterId }: { doc: DocumentInMatter; matterId: strin
       <td className="p-3 text-sm text-gray-500">
         {doc.file_size_bytes ? formatBytes(doc.file_size_bytes) : '-'}
       </td>
-      <td className="p-3 text-sm text-gray-500">
-        {doc.word_count?.toLocaleString() || '-'}
+      <td className="p-3 text-sm">
+        {doc.average_confidence != null ? (
+          <span className={clsx(
+            "font-medium",
+            doc.average_confidence >= 0.7 && "text-green-600",
+            doc.average_confidence >= 0.5 && doc.average_confidence < 0.7 && "text-yellow-600",
+            doc.average_confidence < 0.5 && "text-red-600"
+          )}>
+            {Math.round(doc.average_confidence * 100)}%
+          </span>
+        ) : (
+          <span className="text-gray-400">-</span>
+        )}
       </td>
       <td className="p-3">
         <div className="flex items-center gap-1">
@@ -316,7 +327,7 @@ export default function MatterDetailPage() {
                 <th className="text-left p-3 font-medium text-gray-700">Document</th>
                 <th className="text-left p-3 font-medium text-gray-700">Status</th>
                 <th className="text-left p-3 font-medium text-gray-700">Size</th>
-                <th className="text-left p-3 font-medium text-gray-700">Words</th>
+                <th className="text-left p-3 font-medium text-gray-700">Confidence</th>
                 <th className="text-left p-3 font-medium text-gray-700 w-24">Actions</th>
               </tr>
             </thead>
