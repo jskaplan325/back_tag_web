@@ -59,17 +59,68 @@ interface UnregisteredModel {
   first_seen: string
 }
 
+function detectModelSource(url: string): { source: string; name: string } | null {
+  try {
+    const urlObj = new URL(url)
+    const hostname = urlObj.hostname.toLowerCase()
+    const path = urlObj.pathname
+
+    if (hostname.includes('huggingface.co')) {
+      // Extract org/model from path like /org/model or /org/model/tree/main
+      const match = path.match(/^\/([^/]+\/[^/]+)/)
+      return match ? { source: 'HuggingFace', name: match[1] } : null
+    }
+    if (hostname.includes('github.com')) {
+      const match = path.match(/^\/([^/]+\/[^/]+)/)
+      return match ? { source: 'GitHub', name: match[1] } : null
+    }
+    if (hostname.includes('ai.google.dev') || hostname.includes('google.com')) {
+      return { source: 'Google AI', name: path.split('/').pop() || 'google-model' }
+    }
+    if (hostname.includes('openai.com')) {
+      return { source: 'OpenAI', name: path.split('/').pop() || 'openai-model' }
+    }
+    // Generic URL
+    return { source: 'Custom', name: hostname }
+  } catch {
+    return null
+  }
+}
+
 function AddModelModal({ onClose }: { onClose: () => void }) {
+  const [modelUrl, setModelUrl] = useState('')
   const [modelName, setModelName] = useState('')
   const [modelType, setModelType] = useState('semantic')
+  const [detectedSource, setDetectedSource] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const queryClient = useQueryClient()
+
+  // Auto-detect source and name from URL
+  const handleUrlChange = (url: string) => {
+    setModelUrl(url)
+    setError(null)
+
+    if (url.trim()) {
+      const detected = detectModelSource(url)
+      if (detected) {
+        setDetectedSource(detected.source)
+        if (!modelName) {
+          setModelName(detected.name)
+        }
+      } else {
+        setDetectedSource(null)
+      }
+    } else {
+      setDetectedSource(null)
+    }
+  }
 
   const addMutation = useMutation({
     mutationFn: async () => {
       return api.post('/api/models', {
         name: modelName,
         type: modelType,
+        huggingface_url: modelUrl || undefined,
       })
     },
     onSuccess: () => {
@@ -92,9 +143,9 @@ function AddModelModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+      <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold">Add Model</h2>
+          <h2 className="text-xl font-semibold">Add Model to Registry</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
             <X className="h-6 w-6" />
           </button>
@@ -103,7 +154,29 @@ function AddModelModal({ onClose }: { onClose: () => void }) {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium mb-1">
-              HuggingFace Model Name
+              Model URL
+            </label>
+            <input
+              type="text"
+              value={modelUrl}
+              onChange={(e) => handleUrlChange(e.target.value)}
+              placeholder="https://huggingface.co/org/model or https://github.com/org/repo"
+              className="w-full rounded-lg border p-2"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Paste URL from HuggingFace, GitHub, Google AI, OpenAI, or any source
+            </p>
+            {detectedSource && (
+              <p className="mt-1 text-xs text-green-600 flex items-center gap-1">
+                <Check className="h-3 w-3" />
+                Detected: {detectedSource}
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Model Name / Identifier
             </label>
             <input
               type="text"
@@ -113,7 +186,7 @@ function AddModelModal({ onClose }: { onClose: () => void }) {
               className="w-full rounded-lg border p-2"
             />
             <p className="mt-1 text-xs text-gray-500">
-              Enter the full model path from HuggingFace
+              Unique identifier for this model in your registry
             </p>
           </div>
 
@@ -127,6 +200,7 @@ function AddModelModal({ onClose }: { onClose: () => void }) {
               <option value="semantic">Semantic (Embeddings)</option>
               <option value="vision">Vision (Image Analysis)</option>
               <option value="ocr">OCR (Text Extraction)</option>
+              <option value="llm">LLM (Language Model)</option>
             </select>
           </div>
 
@@ -147,7 +221,7 @@ function AddModelModal({ onClose }: { onClose: () => void }) {
             </button>
             <button
               type="submit"
-              disabled={addMutation.isPending}
+              disabled={addMutation.isPending || !modelName.trim()}
               className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
             >
               {addMutation.isPending ? (
