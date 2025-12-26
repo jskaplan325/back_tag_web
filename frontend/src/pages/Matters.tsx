@@ -5,7 +5,6 @@ import {
   FolderOpen,
   Plus,
   X,
-  ChevronRight,
   Loader2,
   AlertCircle,
   FolderInput,
@@ -1000,7 +999,7 @@ function MatterCard({
       'rounded-lg bg-white p-4 shadow hover:shadow-md transition-shadow relative',
       isSelected && 'ring-2 ring-purple-500'
     )}>
-      {/* Selection checkbox */}
+      {/* Selection checkbox - positioned in top left */}
       {onToggleSelect && (
         <button
           onClick={(e) => {
@@ -1008,18 +1007,18 @@ function MatterCard({
             e.stopPropagation()
             onToggleSelect()
           }}
-          className="absolute top-2 right-2 p-1 hover:bg-gray-100 rounded z-10"
+          className="absolute top-2 left-2 p-1 hover:bg-gray-100 rounded z-10"
         >
           {isSelected ? (
-            <CheckSquare className="h-5 w-5 text-purple-600" />
+            <CheckSquare className="h-4 w-4 text-purple-600" />
           ) : (
-            <Square className="h-5 w-5 text-gray-400" />
+            <Square className="h-4 w-4 text-gray-300 hover:text-gray-400" />
           )}
         </button>
       )}
-      <Link to={`/matters/${matter.id}`}>
+      <Link to={`/matters/${matter.id}`} className="block">
         <div className="flex items-start justify-between mb-3">
-          <div className="flex-1 min-w-0">
+          <div className={clsx("flex-1 min-w-0", onToggleSelect && "pl-6")}>
             <h3 className="font-semibold text-sm truncate" title={matter.name}>
               {matter.name}
             </h3>
@@ -1027,19 +1026,16 @@ function MatterCard({
               {matter.document_count} docs
             </p>
           </div>
-          <div className="flex items-center gap-2 ml-2">
-            {matter.average_confidence != null && (
-              <span className={clsx(
-                "text-xs font-medium px-1.5 py-0.5 rounded",
-                matter.average_confidence >= 0.7 && "bg-green-100 text-green-700",
-                matter.average_confidence >= 0.5 && matter.average_confidence < 0.7 && "bg-yellow-100 text-yellow-700",
-                matter.average_confidence < 0.5 && "bg-red-100 text-red-700"
-              )}>
-                {(matter.average_confidence * 100).toFixed(0)}%
-              </span>
-            )}
-            <ChevronRight className="h-4 w-4 text-gray-400" />
-          </div>
+          {matter.average_confidence != null && (
+            <span className={clsx(
+              "text-xs font-medium px-1.5 py-0.5 rounded ml-2 shrink-0",
+              matter.average_confidence >= 0.7 && "bg-green-100 text-green-700",
+              matter.average_confidence >= 0.5 && matter.average_confidence < 0.7 && "bg-yellow-100 text-yellow-700",
+              matter.average_confidence < 0.5 && "bg-red-100 text-red-700"
+            )}>
+              {(matter.average_confidence * 100).toFixed(0)}%
+            </span>
+          )}
         </div>
       </Link>
 
