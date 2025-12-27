@@ -252,6 +252,9 @@ Where:
 - [ ] Model comparison A/B testing
 - [ ] GPU cloud deployment (A100/H100)
 
+### Integrations
+- [ ] **MatterMgmt DB Integration** - Pull Matter Number and Area of Law from existing Matter Management system to auto-populate matter metadata and improve tag suggestions based on known practice area
+
 ### Potential Enhancements
 - [ ] Multi-language support
 - [ ] Custom tag training UI
