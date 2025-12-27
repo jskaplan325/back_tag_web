@@ -260,7 +260,7 @@ def load_taxonomy_tags(db_session) -> Dict[str, Dict]:
                     'area': area.name,
                     'examples': tag.semantic_examples,
                     'patterns': tag.patterns or [],
-                    'threshold': tag.threshold or 0.45
+                    'threshold': tag.threshold or 0.65  # Raised from 0.45 for E5 model
                 }
 
     return tags
@@ -424,7 +424,7 @@ def tag_text(
     model: SentenceTransformer,
     tag_embeddings: Dict[str, np.ndarray],
     tag_metadata: Dict[str, Dict],
-    threshold: float = 0.45,
+    threshold: float = 0.65,  # Raised from 0.45 for E5 model
     chunk_size: int = 200,
     chunk_overlap: int = 50,
     _retry: bool = False
@@ -499,7 +499,7 @@ def process_document_fast(
     filepath: str,
     db_session,
     model_name: str = "intfloat/e5-large-v2",
-    threshold: float = 0.45,
+    threshold: float = 0.65,  # Raised from 0.45 for E5 model (scores ~22% higher than LegalBERT)
     skip_validation: bool = False
 ) -> Dict[str, Any]:
     """
