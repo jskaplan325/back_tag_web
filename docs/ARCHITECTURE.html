@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Back Tag v0.3.0 Architecture</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="https://cdn.simplecss.org/simple.min.css" />
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">Back Tag v0.3.0 Architecture</h1>
+</header>
+<h1 id="back-tag-v0.3.0---document-intelligence-pipeline">Back Tag
+v0.3.0 - Document Intelligence Pipeline</h1>
+<h2 id="overview">Overview</h2>
+<p>A two-stage semantic document tagging system for legal document
+classification using AI embeddings and pattern matching.</p>
+<hr />
+<h2 id="pipeline-architecture">Pipeline Architecture</h2>
+<pre><code>Document → Quick Scan → Process
+                  ↓
+             ┌─────────────────────────────────────┐
+             │ Detect:                             │
+             │ • File type (PDF/TXT/DOCX/etc)      │
+             │ • Page count                        │
+             │ • Text density (words per page)     │
+             │ • Scanned detection (&lt; 50 words/pg) │
+             └─────────────────────────────────────┘
+                  ↓
+        ┌─────────┴─────────┐
+        ↓                   ↓
+    Text Extractable     Scanned/Image-Only
+    (most documents)     (&lt; 50 words/page)
+        ↓                   ↓
+    Fast Pipeline       Flagged: needs_ocr
+    (~2-5s)             (review queue)
+        │                   │
+        ▼                   ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │                    MODEL REGISTRY                       │
+  │  ┌─────────────────────────────────────────────────┐   │
+  │  │ Semantic (Embeddings) - ACTIVE                  │   │
+  │  │ • intfloat/e5-large-v2 [HF] ← current default  │   │
+  │  │ • pile-of-law/legalbert-large-1.7M-2 [HF]      │   │
+  │  │ • BAAI/bge-large-en-v1.5 [HF]                  │   │
+  │  └─────────────────────────────────────────────────┘   │
+  │  ┌─────────────────────────────────────────────────┐   │
+  │  │ Text Extraction - ACTIVE                        │   │
+  │  │ • pdfplumber [Python] ← fast, reliable         │   │
+  │  │ • python-docx [Python]                         │   │
+  │  └─────────────────────────────────────────────────┘   │
+  │  ┌─────────────────────────────────────────────────┐   │
+  │  │ OCR (Future/Manual) - AVAILABLE                 │   │
+  │  │ • datalab-to/surya [GitHub] (~2 min/page CPU)  │   │
+  │  │   └─ GPU: ~5-10s/page (CUDA/MPS)               │   │
+  │  └─────────────────────────────────────────────────┘   │
+  │  ┌─────────────────────────────────────────────────┐   │
+  │  │ LLM Backend (Future Smart Mode) - PLANNED       │   │
+  │  │ • Ollama/qwen2.5:7b [Local] ← preferred        │   │
+  │  │ • Ollama/llama3.1:8b [Local]                   │   │
+  │  │ • Ollama/mistral:7b [Local]                    │   │
+  │  └─────────────────────────────────────────────────┘   │
+  │                                                         │
+  │  Status: E5 Active • LLM Planned • OCR On-Demand       │
+  └─────────────────────────────────────────────────────────┘</code></pre>
+<hr />
+<h2 id="two-stage-processing">Two-Stage Processing</h2>
+<h3 id="stage-1-fast-mode-e5-embeddings---active">Stage 1: Fast Mode (E5
+Embeddings) - ACTIVE</h3>
+<pre><code>┌─────────────────────────────────────────────────────────┐
+│ STAGE 1: Fast Mode (E5 Embeddings + Cosine Similarity) │
+│ ┌─────────┐    ┌─────────────┐    ┌─────────────────┐  │
+│ │ Extract │ →  │ E5-large-v2 │ →  │ Pattern Match + │  │
+│ │ Text    │    │ Embeddings  │    │ Cosine Similarity│  │
+│ │(pdfplumber)  │ (1024-dim)  │    │ (threshold 0.65)│  │
+│ └─────────┘    └─────────────┘    └─────────────────┘  │
+│                                                         │
+│ • Time: ~2-5 sec per document                          │
+│ • Local only, no API calls                             │
+│ • Returns: tags[], highlights[], confidence scores     │
+└─────────────────────────────────────────────────────────┘</code></pre>
+<h3 id="stage-2-smart-mode-llm---planned">Stage 2: Smart Mode (LLM) -
+PLANNED</h3>
+<pre><code>┌─────────────────────────────────────────────────────────┐
+│ STAGE 2: Smart Mode (LLM Refinement) - CONDITIONAL     │
+│ ┌─────────┐    ┌─────────────┐    ┌─────────────────┐  │
+│ │ Text +  │ →  │ Ollama      │ →  │ Confirm/Reject  │  │
+│ │ E5 Tags │    │ Qwen 7B     │    │ + Reasoning     │  │
+│ └─────────┘    └─────────────┘    └─────────────────┘  │
+│                                                         │
+│ • Trigger: 0.70 ≤ avg_confidence &lt; 0.75 (borderline)   │
+│ • Expected: ~16% of documents                          │
+│ • Time: +3-5s per document                             │
+│ • Use case: Low-confidence tags, nuanced docs          │
+└─────────────────────────────────────────────────────────┘</code></pre>
+<h3 id="processing-flow">Processing Flow</h3>
+<pre><code>Document
+   ↓
+[pdfplumber] Extract text
+   ↓
+[E5-large-v2] Generate embeddings → cosine similarity
+   ↓
+Tags with confidence scores
+   ↓
+┌─────────────────────────────────────────────────┐
+│ IF avg_confidence between 0.70-0.75:            │
+│    → [Ollama/Qwen] Review &amp; refine (PLANNED)    │
+│ ELSE:                                           │
+│    → Return E5 results directly                 │
+└─────────────────────────────────────────────────┘
+   ↓
+Final tagged document</code></pre>
+<hr />
+<h2 id="document-status-flow">Document Status Flow</h2>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Description</th>
+<th>UI Color</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>uploaded</code></td>
+<td>Pending processing</td>
+<td>Gray</td>
+</tr>
+<tr>
+<td><code>processing</code></td>
+<td>Currently being analyzed</td>
+<td>Blue</td>
+</tr>
+<tr>
+<td><code>completed</code></td>
+<td>Successfully tagged</td>
+<td>Green</td>
+</tr>
+<tr>
+<td><code>failed</code></td>
+<td>Error during processing</td>
+<td>Red</td>
+</tr>
+<tr>
+<td><code>ignored</code></td>
+<td>Manually dismissed (non-legal, etc)</td>
+<td>Yellow</td>
+</tr>
+<tr>
+<td><code>needs_ocr</code></td>
+<td>Scanned PDF, requires OCR for text</td>
+<td>Orange</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="tag-categories">Tag Categories</h2>
+<p>The system supports 8 primary legal document categories:</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Category</th>
+<th>Examples</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Investment Funds</strong></td>
+<td>Limited Partnership Agreement, Capital Calls, Distribution</td>
+</tr>
+<tr>
+<td><strong>M&amp;A / Corporate</strong></td>
+<td>Merger Agreement, Due Diligence, Corporate Governance</td>
+</tr>
+<tr>
+<td><strong>Securities / Capital Markets</strong></td>
+<td>SEC Filings, Financial Statements, Prospectus</td>
+</tr>
+<tr>
+<td><strong>Real Estate</strong></td>
+<td>Purchase Agreement, Lease Agreement, Mortgage</td>
+</tr>
+<tr>
+<td><strong>Intellectual Property</strong></td>
+<td>Patent, Trademark, License Agreement</td>
+</tr>
+<tr>
+<td><strong>Employment</strong></td>
+<td>Employment Agreement, Non-Compete / NDA, Benefits</td>
+</tr>
+<tr>
+<td><strong>Litigation</strong></td>
+<td>Settlement, Discovery, Complaint</td>
+</tr>
+<tr>
+<td><strong>Regulatory / Compliance</strong></td>
+<td>Regulatory Filing, Anti-Corruption, Privacy</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="hybrid-confidence-scoring">Hybrid Confidence Scoring</h2>
+<p>Tags are scored using a combination of:</p>
+<ol type="1">
+<li><strong>Semantic Similarity</strong> (60% weight)
+<ul>
+<li>Cosine similarity between document embeddings and tag examples</li>
+<li>Uses E5-large-v2 (1024-dimensional vectors)</li>
+</ul></li>
+<li><strong>Pattern Matching</strong> (up to 35% boost)
+<ul>
+<li>Regex patterns defined per tag</li>
+<li>Word boundaries enforced for short patterns (e.g.,
+<code>\bSEC\b</code>)</li>
+</ul></li>
+</ol>
+<pre><code>Final Score = (semantic × 0.6) + min(pattern_boost, 0.35)
+
+Where:
+  pattern_boost = 0.15 × log2(pattern_matches + 1)</code></pre>
+<h3 id="confidence-thresholds">Confidence Thresholds</h3>
+<table>
+<thead>
+<tr>
+<th>Threshold</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>≥ 0.65</td>
+<td>Tag assigned to document</td>
+</tr>
+<tr>
+<td>0.70 - 0.75</td>
+<td>Stage 2 LLM review (planned)</td>
+</tr>
+<tr>
+<td>≥ 0.75</td>
+<td>High confidence, skip LLM</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="gpu-acceleration">GPU Acceleration</h2>
+<h3 id="current-development-environment">Current Development
+Environment</h3>
+<table>
+<thead>
+<tr>
+<th>Hardware</th>
+<th>E5 Embeddings</th>
+<th>OCR/page</th>
+<th>Throughput</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Apple M3 (MPS)</td>
+<td>2-5s</td>
+<td>~30s</td>
+<td>50-100 docs/min</td>
+</tr>
+</tbody>
+</table>
+<h3 id="production-options-planned">Production Options (Planned)</h3>
+<table>
+<thead>
+<tr>
+<th>Hardware</th>
+<th>E5 Embeddings</th>
+<th>Qwen 7B LLM</th>
+<th>OCR/page</th>
+<th>Throughput</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>RTX 3090 (24GB)</td>
+<td>0.2-0.5s</td>
+<td>2-3s</td>
+<td>~5s</td>
+<td>200-400 docs/min</td>
+</tr>
+<tr>
+<td>A100 (40/80GB)</td>
+<td>0.1-0.3s</td>
+<td>0.5-1s</td>
+<td>~2-3s</td>
+<td>400-600 docs/min</td>
+</tr>
+<tr>
+<td>H100 (80GB)</td>
+<td>0.05-0.1s</td>
+<td>0.3-0.5s</td>
+<td>~1s</td>
+<td>500-1000 docs/min</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="tech-stack">Tech Stack</h2>
+<h3 id="backend">Backend</h3>
+<ul>
+<li><strong>Framework</strong>: FastAPI (Python)</li>
+<li><strong>Database</strong>: SQLite</li>
+<li><strong>ML Runtime</strong>: PyTorch + SentenceTransformers</li>
+<li><strong>PDF Processing</strong>: pdfplumber</li>
+<li><strong>OCR</strong>: Surya (optional)</li>
+</ul>
+<h3 id="frontend">Frontend</h3>
+<ul>
+<li><strong>Framework</strong>: React 18 + TypeScript</li>
+<li><strong>Styling</strong>: Tailwind CSS</li>
+<li><strong>State Management</strong>: TanStack Query</li>
+<li><strong>Charts</strong>: Recharts</li>
+<li><strong>Icons</strong>: Lucide React</li>
+</ul>
+<h3 id="models">Models</h3>
+<ul>
+<li><strong>Embeddings</strong>: intfloat/e5-large-v2 (HuggingFace)</li>
+<li><strong>LLM (planned)</strong>: Ollama with Qwen2.5:7b</li>
+</ul>
+<hr />
+<h2 id="api-endpoints">API Endpoints</h2>
+<h3 id="documents">Documents</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Endpoint</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/api/documents</code></td>
+<td>List all documents</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/documents/{id}</code></td>
+<td>Get document details</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/documents/{id}/process</code></td>
+<td>Process single document</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/documents/{id}/ignore</code></td>
+<td>Mark as ignored</td>
+</tr>
+</tbody>
+</table>
+<h3 id="matters">Matters</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Endpoint</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/api/matters</code></td>
+<td>List all matters</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/matters/{id}</code></td>
+<td>Get matter with documents</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/matters/{id}/process</code></td>
+<td>Process all documents</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/matters/{id}/upload</code></td>
+<td>Upload documents</td>
+</tr>
+</tbody>
+</table>
+<h3 id="metrics">Metrics</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Endpoint</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/api/metrics/summary</code></td>
+<td>Dashboard statistics</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/training/summary</code></td>
+<td>Tag usage statistics</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="future-roadmap">Future Roadmap</h2>
+<h3 id="planned-features">Planned Features</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" />Stage 2 LLM integration
+(Ollama/Qwen)</label></li>
+<li><label><input type="checkbox" />Individual document reprocess
+button</label></li>
+<li><label><input type="checkbox" />Bulk reprocess by tag (when patterns
+change)</label></li>
+<li><label><input type="checkbox" />Model comparison A/B
+testing</label></li>
+<li><label><input type="checkbox" />GPU cloud deployment
+(A100/H100)</label></li>
+</ul>
+<h3 id="potential-enhancements">Potential Enhancements</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" />Multi-language support</label></li>
+<li><label><input type="checkbox" />Custom tag training UI</label></li>
+<li><label><input type="checkbox" />Confidence calibration</label></li>
+<li><label><input type="checkbox" />Active learning from
+feedback</label></li>
+</ul>
+<hr />
+<h2 id="version-history">Version History</h2>
+<table>
+<colgroup>
+<col style="width: 37%" />
+<col style="width: 25%" />
+<col style="width: 37%" />
+</colgroup>
+<thead>
+<tr>
+<th>Version</th>
+<th>Date</th>
+<th>Changes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0.3.0</td>
+<td>2024-12-27</td>
+<td>Ignored status, needs_ocr detection, word boundary fix</td>
+</tr>
+<tr>
+<td>0.2.0</td>
+<td>2024-12-26</td>
+<td>E5 model, tag highlights, fast pipeline</td>
+</tr>
+<tr>
+<td>0.1.0</td>
+<td>2024-12-25</td>
+<td>Initial release with LegalBERT</td>
+</tr>
+</tbody>
+</table>
+</body>
+</html>
