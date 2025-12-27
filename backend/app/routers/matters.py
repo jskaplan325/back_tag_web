@@ -962,8 +962,8 @@ def run_fast_pipeline(document_id: str, filepath: str, skip_validation: bool = F
                 document.word_count = result_data.get('word_count')
                 document.page_count = 1  # Text-based
                 document.error_message = None
-            elif doc_status == 'skipped':
-                document.status = "skipped"
+            elif doc_status == 'ignored':
+                document.status = "ignored"
                 document.error_message = status_reason
             else:  # failed
                 document.status = "failed"

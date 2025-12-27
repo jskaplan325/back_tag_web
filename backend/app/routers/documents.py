@@ -168,7 +168,7 @@ async def list_documents(
 class ReviewQueueItem(BaseModel):
     id: str
     filename: str
-    status: str  # skipped, failed, needs_review, low_confidence
+    status: str  # ignored, failed, needs_review, low_confidence
     reason: str
     uploaded_at: datetime
     matter_id: Optional[str]
@@ -193,7 +193,7 @@ class RetryRequest(BaseModel):
 
 @router.get("/review-queue", response_model=List[ReviewQueueItem])
 async def get_review_queue(
-    status_filter: Optional[str] = None,  # skipped, failed, needs_review, low_confidence
+    status_filter: Optional[str] = None,  # ignored, failed, needs_review, low_confidence
     matter_id: Optional[str] = None,
     matter_type: Optional[str] = None,
     skip: int = 0,
@@ -202,9 +202,9 @@ async def get_review_queue(
 ):
     """
     Get documents that need human review.
-    Includes: skipped, failed, needs_review, and low_confidence documents.
+    Includes: ignored, failed, needs_review, and low_confidence documents.
     """
-    review_statuses = ['skipped', 'failed', 'needs_review']
+    review_statuses = ['ignored', 'failed', 'needs_review']
     result = []
 
     # Handle low_confidence separately - these are completed docs with low scores
@@ -239,7 +239,7 @@ async def get_review_queue(
                         average_confidence=latest_result.average_confidence
                     ))
 
-    # Get regular review queue items (skipped, failed, needs_review)
+    # Get regular review queue items (ignored, failed, needs_review)
     if status_filter != 'low_confidence':
         query = db.query(Document)
 
@@ -282,7 +282,7 @@ async def get_review_queue(
 @router.get("/review-queue/stats")
 async def get_review_queue_stats(db: Session = Depends(get_db)):
     """Get summary stats for the review queue."""
-    skipped = db.query(Document).filter(Document.status == 'skipped').count()
+    ignored = db.query(Document).filter(Document.status == 'ignored').count()
     failed = db.query(Document).filter(Document.status == 'failed').count()
     needs_review = db.query(Document).filter(Document.status == 'needs_review').count()
 
@@ -298,8 +298,8 @@ async def get_review_queue_stats(db: Session = Depends(get_db)):
                 low_confidence += 1
 
     return {
-        "total": skipped + failed + needs_review + low_confidence,
-        "skipped": skipped,
+        "total": ignored + failed + needs_review + low_confidence,
+        "ignored": ignored,
         "failed": failed,
         "needs_review": needs_review,
         "low_confidence": low_confidence
@@ -317,7 +317,7 @@ async def retry_all_in_queue(
     """Retry all documents in the review queue."""
     from ..routers.matters import run_fast_pipeline, run_ocr_pipeline, run_smart_pipeline
 
-    review_statuses = ['skipped', 'failed', 'needs_review']
+    review_statuses = ['ignored', 'failed', 'needs_review']
 
     query = db.query(Document)
 
@@ -561,6 +561,26 @@ async def dismiss_document(
     return {"message": "Document dismissed", "document_id": document_id}
 
 
+@router.post("/{document_id}/ignore")
+async def ignore_document(
+    document_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Mark a document as ignored (e.g., non-processable file types, code files).
+    Removes it from failed/pending counts without deleting.
+    """
+    document = db.query(Document).filter(Document.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    document.status = "ignored"
+    document.error_message = "Ignored by user"
+    db.commit()
+
+    return {"message": "Document ignored", "document_id": document_id}
+
+
 @router.post("/{document_id}/retry")
 async def retry_document(
     document_id: str,
@@ -582,8 +602,8 @@ async def retry_document(
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # Allow retrying: skipped, failed, needs_review, uploaded, AND completed (for low confidence)
-    allowed_statuses = ['skipped', 'failed', 'needs_review', 'uploaded', 'completed']
+    # Allow retrying: ignored, failed, needs_review, uploaded, AND completed (for low confidence)
+    allowed_statuses = ['ignored', 'failed', 'needs_review', 'uploaded', 'completed']
     if document.status not in allowed_statuses and not request.force:
         raise HTTPException(
             status_code=400,
@@ -634,66 +654,30 @@ def run_pipeline(
 ):
     """Run the document tagging pipeline (background task)."""
     from ..database.db import SessionLocal, Document, Result, Model, ModelUsage
+    from ..services.fast_tagger import process_document_fast
     import time
 
     db = SessionLocal()
     try:
-        # Try to import back_tag - it should be pip installed
-        try:
-            from back_tag import DocumentTagger
-        except ImportError:
-            # Fallback: add to path if not installed
-            import sys
-            back_tag_path = Path(__file__).parent.parent.parent.parent.parent / "back_tag"
-            if str(back_tag_path) not in sys.path:
-                sys.path.insert(0, str(back_tag_path))
-            from back_tag import DocumentTagger
+        # Use fast_tagger for consistent output format with highlights
+        result_data = process_document_fast(
+            filepath,
+            db,
+            model_name=semantic_model,
+            threshold=0.65
+        )
 
-        # Check file type
+        # Get page count
         file_ext = Path(filepath).suffix.lower()
-
-        if file_ext == '.txt':
-            # Handle text files directly
-            start_time = time.time()
-
-            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-                text_content = f.read()
-
-            word_count = len(text_content.split())
-
-            # Initialize tagger for text processing only
-            tagger = DocumentTagger(
-                semantic_model=semantic_model,
-                use_gpu=True,
-                enable_vision=False,  # No vision for text files
-                vision_model=None
-            )
-
-            # Process text directly using the tagger's text processing
-            result_data = tagger.process_text(text_content)
-            result_data['processing_time_seconds'] = time.time() - start_time
-            result_data['word_count'] = word_count
-            page_count = 1  # Text files are single page
-
-        else:
-            # Initialize tagger for PDF processing
-            tagger = DocumentTagger(
-                semantic_model=semantic_model,
-                use_gpu=True,
-                enable_vision=enable_vision,
-                vision_model=vision_model
-            )
-
-            # Process document (PDF)
-            result_data = tagger.process_document(filepath)
-
-            # Get page count from PDF
+        if file_ext == '.pdf':
             try:
                 from pdf2image import pdfinfo_from_path
                 pdf_info = pdfinfo_from_path(filepath)
                 page_count = pdf_info.get('Pages', 0)
             except Exception:
                 page_count = result_data.get('page_count', 0)
+        else:
+            page_count = 1  # Text files are single page
 
         # Create result record
         processing_time = result_data.get('processing_time_seconds', 0)
@@ -755,12 +739,21 @@ def run_pipeline(
             )
             db.add(vision_usage)
 
-        # Update document
+        # Update document based on processing status
+        doc_status = result_data.get('status', 'processed')
         document = db.query(Document).filter(Document.id == document_id).first()
         if document:
-            document.status = "completed"
-            document.word_count = result_data.get('word_count')
-            document.page_count = page_count
+            if doc_status == 'processed':
+                document.status = "completed"
+                document.word_count = result_data.get('word_count')
+                document.page_count = page_count
+                document.error_message = None
+            elif doc_status == 'ignored':
+                document.status = "ignored"
+                document.error_message = result_data.get('status_reason', 'Unsupported file type')
+            else:  # failed
+                document.status = "failed"
+                document.error_message = result_data.get('status_reason', 'Processing failed')
 
         db.commit()
 

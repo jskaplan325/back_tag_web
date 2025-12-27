@@ -14,7 +14,8 @@ import {
   XCircle,
   Tag,
   X,
-  RefreshCw
+  RefreshCw,
+  EyeOff
 } from 'lucide-react'
 import clsx from 'clsx'
 import api from '../api'
@@ -48,6 +49,16 @@ interface MatterTagsResponse {
   top_tags: MatterTag[]
 }
 
+interface MatterConfidence {
+  matter_id: string
+  overall_confidence: number | null
+  total_tags: number
+  confirmed_tags: number
+  rejected_tags: number
+  pending_review: number
+  review_progress: number
+}
+
 interface MatterDetail {
   id: string
   name: string
@@ -76,6 +87,7 @@ const statusConfig: Record<string, { color: string; icon: React.ElementType; lab
   processing: { color: 'text-blue-500', icon: Loader2, label: 'Processing' },
   completed: { color: 'text-green-500', icon: CheckCircle, label: 'Completed' },
   failed: { color: 'text-red-500', icon: XCircle, label: 'Failed' },
+  ignored: { color: 'text-yellow-500', icon: EyeOff, label: 'Ignored' },
 }
 
 function formatBytes(bytes: number): string {
@@ -109,6 +121,14 @@ function ErrorDetailsModal({
     },
   })
 
+  const ignoreMutation = useMutation({
+    mutationFn: (docId: string) => api.post(`/api/documents/${docId}/ignore`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['matter', matterId] })
+      queryClient.invalidateQueries({ queryKey: ['failed-docs', matterId] })
+    },
+  })
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="w-full max-w-lg rounded-lg bg-white shadow-xl mx-4 max-h-[80vh] flex flex-col">
@@ -138,12 +158,25 @@ function ErrorDetailsModal({
             <div className="space-y-3">
               {failedDocs.map(doc => (
                 <div key={doc.id} className="bg-red-50 border border-red-100 rounded-lg p-3">
-                  <p className="font-medium text-sm text-gray-900 truncate" title={doc.filename}>
-                    {doc.filename}
-                  </p>
-                  <p className="mt-1 text-sm text-red-600 break-words">
-                    {doc.error_message || 'Unknown error'}
-                  </p>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm text-gray-900 truncate" title={doc.filename}>
+                        {doc.filename}
+                      </p>
+                      <p className="mt-1 text-sm text-red-600 break-words">
+                        {doc.error_message || 'Unknown error'}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => ignoreMutation.mutate(doc.id)}
+                      disabled={ignoreMutation.isPending}
+                      className="flex-shrink-0 flex items-center gap-1 px-2 py-1 text-xs text-yellow-700 bg-yellow-100 hover:bg-yellow-200 rounded transition-colors"
+                      title="Mark as ignored"
+                    >
+                      <EyeOff className="h-3 w-3" />
+                      Ignore
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -291,6 +324,13 @@ export default function MatterDetailPage() {
     enabled: !!id,
   })
 
+  const { data: confidenceData } = useQuery<MatterConfidence>({
+    queryKey: ['matter-confidence', id],
+    queryFn: () => api.get(`/api/matters/${id}/confidence`).then(r => r.data),
+    enabled: !!id,
+    refetchInterval: 5000, // Refresh to show updated feedback
+  })
+
   const processAllMutation = useMutation({
     mutationFn: async () => {
       if (!matter) return
@@ -335,6 +375,7 @@ export default function MatterDetailPage() {
   const completedCount = matter.documents.filter(d => d.status === 'completed').length
   const failedCount = matter.documents.filter(d => d.status === 'failed').length
   const processingCount = matter.documents.filter(d => d.status === 'processing').length
+  const ignoredCount = matter.documents.filter(d => d.status === 'ignored').length
 
   return (
     <div className="p-8 max-w-6xl mx-auto">
@@ -390,7 +431,7 @@ export default function MatterDetailPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-6 gap-4 mb-6">
         <div className="rounded-lg bg-white p-4 shadow">
           <p className="text-2xl font-bold">{matter.document_count}</p>
           <p className="text-sm text-gray-500">Total Documents</p>
@@ -426,6 +467,46 @@ export default function MatterDetailPage() {
             <>
               <p className="text-2xl font-bold text-gray-300">0</p>
               <p className="text-sm text-gray-400">Failed</p>
+            </>
+          )}
+        </div>
+        <div className="rounded-lg bg-white p-4 shadow">
+          <p className={clsx("text-2xl font-bold", ignoredCount > 0 ? "text-yellow-500" : "text-gray-300")}>
+            {ignoredCount}
+          </p>
+          <p className="text-sm text-gray-500 flex items-center gap-1">
+            <EyeOff className="h-3 w-3" />
+            Ignored
+          </p>
+        </div>
+        {/* Confidence Score */}
+        <div className="rounded-lg bg-white p-4 shadow">
+          {confidenceData?.overall_confidence != null ? (
+            <>
+              <p className={clsx(
+                "text-2xl font-bold",
+                confidenceData.overall_confidence >= 0.7 && "text-green-600",
+                confidenceData.overall_confidence >= 0.5 && confidenceData.overall_confidence < 0.7 && "text-yellow-600",
+                confidenceData.overall_confidence < 0.5 && "text-red-600"
+              )}>
+                {Math.round(confidenceData.overall_confidence * 100)}%
+              </p>
+              <p className="text-sm text-gray-500">Confidence</p>
+              {confidenceData.total_tags > 0 && (
+                <div className="mt-2 text-xs text-gray-400">
+                  <span className="text-green-600">{confidenceData.confirmed_tags}</span>
+                  {' / '}
+                  <span className="text-red-500">{confidenceData.rejected_tags}</span>
+                  {' / '}
+                  <span>{confidenceData.pending_review}</span>
+                  <span className="ml-1">(✓/✗/pending)</span>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="text-2xl font-bold text-gray-300">-</p>
+              <p className="text-sm text-gray-400">Confidence</p>
             </>
           )}
         </div>

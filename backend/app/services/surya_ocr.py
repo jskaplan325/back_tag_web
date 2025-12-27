@@ -19,20 +19,26 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-# Lazy load Surya to avoid import overhead
-_foundation_predictor = None
-_recognition_predictor = None
-_detection_predictor = None
-_layout_predictor = None
+# Lazy load Surya models
+_det_model = None
+_det_processor = None
+_rec_model = None
+_rec_processor = None
 
-SURYA_AVAILABLE = False
-try:
-    from surya.foundation import FoundationPredictor
-    from surya.recognition import RecognitionPredictor
-    from surya.detection import DetectionPredictor
-    SURYA_AVAILABLE = True
-except ImportError as e:
-    logger.warning(f"Surya not available: {e}. Install with: pip install surya-ocr")
+def check_surya_available():
+    """Check if surya is available (called at runtime, not import time)."""
+    try:
+        from surya.ocr import run_ocr
+        from surya.model.detection.model import load_model as load_det_model, load_processor as load_det_processor
+        from surya.model.recognition.model import load_model as load_rec_model
+        from surya.model.recognition.processor import load_processor as load_rec_processor
+        return True
+    except ImportError as e:
+        logger.warning(f"Surya not available: {e}. Install with: pip install surya-ocr")
+        return False
+
+# Check at import time for backward compat, but also check at runtime
+SURYA_AVAILABLE = check_surya_available()
 
 # PDF to image conversion
 try:
@@ -75,42 +81,35 @@ def get_device() -> str:
 
 
 def _init_surya():
-    """Initialize Surya predictors (lazy loading)."""
-    global _foundation_predictor, _recognition_predictor, _detection_predictor
+    """Initialize Surya models (lazy loading)."""
+    global _det_model, _det_processor, _rec_model, _rec_processor
 
     if not SURYA_AVAILABLE:
         raise ImportError("Surya OCR not installed. Run: pip install surya-ocr")
 
-    if _foundation_predictor is None:
+    if _det_model is None:
         logger.info("Initializing Surya OCR models...")
         device = get_device()
         logger.info(f"Using device: {device}")
 
-        # Set batch size based on available memory
-        # MPS and smaller GPUs need smaller batches
-        if device == "mps":
-            os.environ.setdefault("RECOGNITION_BATCH_SIZE", "64")
-        elif device == "cuda":
-            os.environ.setdefault("RECOGNITION_BATCH_SIZE", "256")
-        else:
-            os.environ.setdefault("RECOGNITION_BATCH_SIZE", "16")
+        from surya.model.detection.model import load_model as load_det_model, load_processor as load_det_processor
+        from surya.model.recognition.model import load_model as load_rec_model
+        from surya.model.recognition.processor import load_processor as load_rec_processor
 
-        from surya.foundation import FoundationPredictor
-        from surya.recognition import RecognitionPredictor
-        from surya.detection import DetectionPredictor
-
-        _foundation_predictor = FoundationPredictor()
-        _recognition_predictor = RecognitionPredictor(_foundation_predictor)
-        _detection_predictor = DetectionPredictor()
+        _det_model = load_det_model()
+        _det_processor = load_det_processor()
+        _rec_model = load_rec_model()
+        _rec_processor = load_rec_processor()
 
         logger.info("Surya OCR models loaded")
 
-    return _recognition_predictor, _detection_predictor
+    return _det_model, _det_processor, _rec_model, _rec_processor
 
 
 def extract_text_from_image(
     image: Image.Image,
-    page_num: int = 0
+    page_num: int = 0,
+    langs: List[str] = None
 ) -> Tuple[str, List[TextLine]]:
     """
     Extract text from a PIL Image with bounding boxes.
@@ -118,14 +117,27 @@ def extract_text_from_image(
     Args:
         image: PIL Image object
         page_num: Page number for multi-page documents
+        langs: Languages to use for OCR (default: ["en"])
 
     Returns:
         Tuple of (full_text, list of TextLine objects)
     """
-    recognition, detection = _init_surya()
+    if langs is None:
+        langs = ["en"]
+
+    det_model, det_processor, rec_model, rec_processor = _init_surya()
+
+    from surya.ocr import run_ocr
 
     # Run OCR
-    predictions = recognition([image], det_predictor=detection)
+    predictions = run_ocr(
+        [image],
+        [langs],
+        det_model,
+        det_processor,
+        rec_model,
+        rec_processor
+    )
 
     if not predictions or len(predictions) == 0:
         return "", []
@@ -137,18 +149,18 @@ def extract_text_from_image(
     # Process each text line
     for line_data in result.text_lines:
         text = line_data.text
-        confidence = line_data.confidence
-        bbox = line_data.bbox  # (x1, y1, x2, y2)
-        polygon = line_data.polygon  # 4 corner points
+        confidence = getattr(line_data, 'confidence', 1.0)
+        bbox = getattr(line_data, 'bbox', [0, 0, 0, 0])
+        polygon = getattr(line_data, 'polygon', [])
 
         # Extract words if available
         words = []
         if hasattr(line_data, 'words') and line_data.words:
             for word in line_data.words:
                 words.append({
-                    'text': word.text,
-                    'confidence': word.confidence,
-                    'bbox': word.bbox,
+                    'text': getattr(word, 'text', ''),
+                    'confidence': getattr(word, 'confidence', 1.0),
+                    'bbox': getattr(word, 'bbox', [0, 0, 0, 0]),
                 })
 
         line = TextLine(
@@ -168,7 +180,8 @@ def extract_text_from_image(
 
 def extract_text_from_pdf(
     pdf_path: str,
-    dpi: int = 200
+    dpi: int = 200,
+    langs: List[str] = None
 ) -> OCRResult:
     """
     Extract text from a PDF document with bounding boxes.
@@ -176,12 +189,16 @@ def extract_text_from_pdf(
     Args:
         pdf_path: Path to PDF file
         dpi: Resolution for PDF to image conversion
+        langs: Languages to use for OCR (default: ["en"])
 
     Returns:
         OCRResult with text and line-level bounding boxes
     """
     if not PDF2IMAGE_AVAILABLE:
         raise ImportError("pdf2image not available. Install with: pip install pdf2image")
+
+    if langs is None:
+        langs = ["en"]
 
     pdf_path = Path(pdf_path)
     if not pdf_path.exists():
@@ -201,7 +218,7 @@ def extract_text_from_pdf(
     # Process each page
     for page_num, image in enumerate(images):
         logger.debug(f"Processing page {page_num + 1}/{len(images)}")
-        page_text, page_lines = extract_text_from_image(image, page_num)
+        page_text, page_lines = extract_text_from_image(image, page_num, langs)
 
         all_text.append(page_text)
         all_lines.extend(page_lines)
@@ -228,17 +245,22 @@ def extract_text_from_pdf(
 
 
 def extract_text_from_image_file(
-    image_path: str
+    image_path: str,
+    langs: List[str] = None
 ) -> OCRResult:
     """
     Extract text from an image file with bounding boxes.
 
     Args:
         image_path: Path to image file (PNG, JPG, etc.)
+        langs: Languages to use for OCR (default: ["en"])
 
     Returns:
         OCRResult with text and line-level bounding boxes
     """
+    if langs is None:
+        langs = ["en"]
+
     image_path = Path(image_path)
     if not image_path.exists():
         raise FileNotFoundError(f"Image not found: {image_path}")
@@ -249,7 +271,7 @@ def extract_text_from_image_file(
     if image.mode != "RGB":
         image = image.convert("RGB")
 
-    full_text, lines = extract_text_from_image(image, page_num=0)
+    full_text, lines = extract_text_from_image(image, page_num=0, langs=langs)
     word_count = len(full_text.split())
 
     total_confidence = sum(line.confidence for line in lines)
@@ -286,20 +308,22 @@ class SuryaOCRHandler:
     but with better accuracy and GPU acceleration.
     """
 
-    def __init__(self, dpi: int = 200):
+    def __init__(self, dpi: int = 200, langs: List[str] = None):
         """
         Initialize Surya OCR handler.
 
         Args:
             dpi: DPI for PDF to image conversion
+            langs: Languages for OCR (default: ["en"])
         """
         if not SURYA_AVAILABLE:
             raise ImportError(
                 "Surya OCR not available.\n"
-                "Install with: pip install surya-ocr\n"
-                "Requires Python 3.10+ and PyTorch"
+                "Install with: pip install 'surya-ocr==0.4.15'\n"
+                "Requires PyTorch"
             )
         self.dpi = dpi
+        self.langs = langs or ["en"]
         self._last_result: Optional[OCRResult] = None
 
     def extract_text_from_pdf(self, pdf_path: str) -> str:
@@ -312,7 +336,7 @@ class SuryaOCRHandler:
         Returns:
             Extracted text as string
         """
-        result = extract_text_from_pdf(pdf_path, dpi=self.dpi)
+        result = extract_text_from_pdf(pdf_path, dpi=self.dpi, langs=self.langs)
         self._last_result = result
         return result.text
 
@@ -326,7 +350,7 @@ class SuryaOCRHandler:
         Returns:
             Extracted text as string
         """
-        result = extract_text_from_image_file(image_path)
+        result = extract_text_from_image_file(image_path, langs=self.langs)
         self._last_result = result
         return result.text
 

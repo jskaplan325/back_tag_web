@@ -34,7 +34,7 @@ async def get_matter_types(db: Session = Depends(get_db)):
 class DashboardSummary(BaseModel):
     total_documents: int
     total_processed: int
-    total_skipped: int  # Unsupported file types
+    total_ignored: int  # Unsupported file types
     total_failed: int   # Corrupted/unreadable
     avg_confidence: float  # Only from successfully processed docs
     avg_processing_time: float
@@ -80,11 +80,11 @@ async def get_dashboard_summary(
 
     total_docs = doc_query.count()
     completed = doc_query.filter(Document.status == "completed").count()
-    skipped = doc_query.filter(Document.status == "skipped").count()
+    ignored = doc_query.filter(Document.status == "ignored").count()
     failed = doc_query.filter(Document.status == "failed").count()
 
     # Get average confidence and processing time from results
-    # Only include results from completed documents (not skipped/failed)
+    # Only include results from completed documents (not ignored/failed)
     if matter_type:
         # Get document IDs for completed documents of this matter type
         completed_doc_ids = [d.id for d in doc_query.filter(Document.status == "completed").all()]
@@ -111,7 +111,7 @@ async def get_dashboard_summary(
     return DashboardSummary(
         total_documents=total_docs,
         total_processed=completed,
-        total_skipped=skipped,
+        total_ignored=ignored,
         total_failed=failed,
         avg_confidence=round(avg_confidence, 3),
         avg_processing_time=round(avg_time, 2),
@@ -223,6 +223,60 @@ async def get_cost_summary(
             request_count=data["count"]
         )
         for provider, data in by_provider.items()
+    ]
+
+
+class ProcessingLeaderboard(BaseModel):
+    rank: int
+    document_name: str
+    document_id: str
+    matter_name: Optional[str]
+    processing_time: float
+    word_count: Optional[int]
+    tag_count: int
+    confidence: Optional[float]
+
+
+@router.get("/leaderboard", response_model=List[ProcessingLeaderboard])
+async def get_processing_leaderboard(
+    limit: int = Query(10, ge=1, le=50),
+    sort_by: str = Query("time", description="Sort by: time, words, tags"),
+    db: Session = Depends(get_db)
+):
+    """Get leaderboard of documents by processing time, word count, or tags."""
+    # Get results with their documents
+    results = db.query(Result).join(Document).filter(Document.status == "completed").all()
+
+    leaderboard_data = []
+    for result in results:
+        doc = db.query(Document).filter(Document.id == result.document_id).first()
+        if not doc:
+            continue
+
+        matter = db.query(Matter).filter(Matter.id == doc.matter_id).first() if doc.matter_id else None
+
+        leaderboard_data.append({
+            "document_name": doc.filename,
+            "document_id": str(doc.id),
+            "matter_name": matter.name if matter else None,
+            "processing_time": result.processing_time_seconds or 0,
+            "word_count": doc.word_count,
+            "tag_count": result.tag_count or 0,
+            "confidence": result.average_confidence,
+        })
+
+    # Sort based on criteria
+    if sort_by == "words":
+        leaderboard_data.sort(key=lambda x: x["word_count"] or 0, reverse=True)
+    elif sort_by == "tags":
+        leaderboard_data.sort(key=lambda x: x["tag_count"], reverse=True)
+    else:  # default: time
+        leaderboard_data.sort(key=lambda x: x["processing_time"], reverse=True)
+
+    # Add ranks and limit
+    return [
+        ProcessingLeaderboard(rank=i + 1, **item)
+        for i, item in enumerate(leaderboard_data[:limit])
     ]
 
 

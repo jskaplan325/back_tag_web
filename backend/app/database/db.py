@@ -207,6 +207,67 @@ class TagUsage(Base):
     detected_at = Column(DateTime, default=datetime.utcnow)
 
 
+class TagFeedback(Base):
+    """Human feedback on tag detections for learning loop."""
+    __tablename__ = "tag_feedback"
+
+    id = Column(String(36), primary_key=True)
+    document_id = Column(String(36), ForeignKey("documents.id"), nullable=False)
+    result_id = Column(String(36), ForeignKey("results.id"), nullable=False)
+    tag_name = Column(String(100), nullable=False)
+
+    # Original ML prediction
+    original_confidence = Column(Float)
+    original_detected = Column(Boolean, default=True)
+
+    # Human feedback
+    action = Column(String(20), nullable=False)  # 'confirmed', 'rejected', 'added'
+    reviewed_by = Column(String(100), nullable=True)
+    reviewed_at = Column(DateTime, default=datetime.utcnow)
+
+    # Context for learning
+    area_of_law = Column(String(100), nullable=True)
+    matter_type = Column(String(100), nullable=True)
+
+    # Relationships
+    document = relationship("Document")
+    result = relationship("Result")
+
+
+class Annotation(Base):
+    """User-created annotations for ML training data."""
+    __tablename__ = "annotations"
+
+    id = Column(String(36), primary_key=True)
+    document_id = Column(String(36), ForeignKey("documents.id"), nullable=False)
+    page_number = Column(Integer, nullable=False)  # 1-indexed
+
+    # Normalized bounding box (0.0-1.0 relative to page dimensions)
+    x1 = Column(Float, nullable=False)
+    y1 = Column(Float, nullable=False)
+    x2 = Column(Float, nullable=False)
+    y2 = Column(Float, nullable=False)
+
+    # Tag association
+    tag_name = Column(String(100), nullable=False)
+    tag_id = Column(String(36), ForeignKey("tags.id"), nullable=True)
+    area_of_law = Column(String(100), nullable=True)
+
+    # Training metadata
+    annotation_type = Column(String(20), default="positive")  # positive, negative, uncertain
+    color = Column(String(20), default="green")  # green, yellow, red
+    source = Column(String(20), default="human")  # human, ocr, ml
+
+    # Audit
+    created_by = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    notes = Column(Text, nullable=True)
+
+    # Relationships
+    document = relationship("Document")
+    tag = relationship("Tag")
+
+
 def init_db():
     """Initialize database tables."""
     Base.metadata.create_all(bind=engine)

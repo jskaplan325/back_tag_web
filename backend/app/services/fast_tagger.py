@@ -47,7 +47,7 @@ class DocumentQualityResult:
     """Result of document quality validation."""
     def __init__(self, is_valid: bool, status: str, reason: str = "", pipeline: str = "fast"):
         self.is_valid = is_valid
-        self.status = status  # 'processed', 'skipped', 'failed', 'needs_review'
+        self.status = status  # 'processed', 'ignored', 'failed', 'needs_review'
         self.reason = reason
         self.pipeline = pipeline  # 'fast', 'ocr', 'smart'
 
@@ -61,7 +61,7 @@ def check_file_type(filepath: str) -> DocumentQualityResult:
     elif ext in OCR_EXTENSIONS:
         return DocumentQualityResult(True, 'processed', reason='Image file - requires OCR', pipeline='ocr')
     elif ext in SKIP_EXTENSIONS:
-        return DocumentQualityResult(False, 'skipped', f'Unsupported file type: {ext}')
+        return DocumentQualityResult(False, 'ignored', f'Unsupported file type: {ext}')
     elif ext in FUTURE_SUPPORT:
         return DocumentQualityResult(False, 'needs_review', f'File type {ext} may need special handling')
     else:
@@ -122,7 +122,7 @@ def validate_text_quality(text: str, min_words: int = 30) -> DocumentQualityResu
     ]
     code_matches = sum(len(re.findall(p, sample, re.IGNORECASE)) for p in code_indicators)
     if code_matches > 5:
-        return DocumentQualityResult(False, 'skipped', 'Code/markup content detected (not a legal document)')
+        return DocumentQualityResult(False, 'ignored', 'Code/markup content detected (not a legal document)')
 
     # Check for reasonable prose (sentences, punctuation)
     # Legal docs often use colons, semi-colons, and numbered lists
@@ -507,7 +507,7 @@ def process_document_fast(
 
     Returns a result dict with status field:
     - 'processed': Successfully tagged (confidence is meaningful)
-    - 'skipped': Unsupported file type (not included in metrics)
+    - 'ignored': Unsupported file type (not included in metrics)
     - 'failed': Extraction/quality issue (shown as error)
 
     Args:

@@ -3,6 +3,24 @@ Document Intelligence Dashboard - FastAPI Backend
 
 Main application entry point.
 """
+# Python 3.9 compatibility shim for huggingface_hub
+# packages_distributions() was added in Python 3.10
+import sys
+if sys.version_info < (3, 10):
+    import importlib.metadata
+    if not hasattr(importlib.metadata, 'packages_distributions'):
+        def _packages_distributions():
+            """Fallback implementation of packages_distributions for Python 3.9."""
+            pkg_to_dist = {}
+            for dist in importlib.metadata.distributions():
+                if dist.files:
+                    for file in dist.files:
+                        name = file.parts[0] if file.parts else ''
+                        if name:
+                            pkg_to_dist.setdefault(name, []).append(dist.metadata['Name'])
+            return pkg_to_dist
+        importlib.metadata.packages_distributions = _packages_distributions
+
 import os
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -12,7 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .database.db import init_db
-from .routers import documents, results, models, metrics, taxonomy, matters
+from .routers import documents, results, models, metrics, taxonomy, matters, feedback, annotations
 
 # Configuration
 DATA_DIR = Path(os.getenv("DATA_DIR", "./data"))
@@ -59,6 +77,8 @@ app.include_router(models.router, prefix="/api/models", tags=["Models"])
 app.include_router(metrics.router, prefix="/api/metrics", tags=["Metrics"])
 app.include_router(taxonomy.router, prefix="/api/taxonomy", tags=["Taxonomy"])
 app.include_router(matters.router, prefix="/api/matters", tags=["Matters"])
+app.include_router(feedback.router, prefix="/api", tags=["Feedback"])
+app.include_router(annotations.router, prefix="/api", tags=["Annotations"])
 
 
 @app.get("/")

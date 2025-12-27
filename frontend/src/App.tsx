@@ -6,7 +6,9 @@ import {
   BarChart3,
   Scale,
   FolderOpen,
-  AlertCircle
+  AlertCircle,
+  AlertTriangle,
+  Database
 } from 'lucide-react'
 import clsx from 'clsx'
 import { DEMO_MODE } from './api'
@@ -23,11 +25,15 @@ import TaxonomyDetail from './pages/TaxonomyDetail'
 import Matters from './pages/Matters'
 import MatterDetail from './pages/MatterDetail'
 import MattersByType from './pages/MattersByType'
+import ReviewQueue from './pages/ReviewQueue'
+import TrainingDashboard from './pages/TrainingDashboard'
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Documents', href: '/documents', icon: FileText },
   { name: 'Matters', href: '/matters', icon: FolderOpen },
+  { name: 'Review Queue', href: '/review', icon: AlertTriangle },
+  { name: 'Training Data', href: '/training', icon: Database },
   { name: 'Taxonomy', href: '/taxonomy', icon: Scale },
   { name: 'Models', href: '/models', icon: Box },
   { name: 'Metrics', href: '/metrics', icon: BarChart3 },
@@ -62,6 +68,9 @@ function Sidebar() {
           )
         })}
       </nav>
+      <div className="px-4 py-3 border-t border-gray-800">
+        <p className="text-xs text-gray-500">v0.2.0</p>
+      </div>
     </div>
   )
 }
@@ -90,6 +99,8 @@ function App() {
           <Route path="/matters" element={<Matters />} />
           <Route path="/matters/type/:type" element={<MattersByType />} />
           <Route path="/matters/:id" element={<MatterDetail />} />
+          <Route path="/review" element={<ReviewQueue />} />
+          <Route path="/training" element={<TrainingDashboard />} />
           <Route path="/taxonomy" element={<Taxonomy />} />
           <Route path="/taxonomy/:id" element={<TaxonomyDetail />} />
           <Route path="/models" element={<Models />} />

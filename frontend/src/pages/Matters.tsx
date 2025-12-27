@@ -18,7 +18,8 @@ import {
   XCircle,
   Search,
   CheckSquare,
-  Square
+  Square,
+  ExternalLink
 } from 'lucide-react'
 import clsx from 'clsx'
 import api from '../api'
@@ -932,9 +933,18 @@ function ErrorDetailsModal({
             <div className="space-y-3">
               {failedDocs.map(doc => (
                 <div key={doc.id} className="bg-red-50 border border-red-100 rounded-lg p-3">
-                  <p className="font-medium text-sm text-gray-900 truncate" title={doc.filename}>
-                    {doc.filename}
-                  </p>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="font-medium text-sm text-gray-900 truncate flex-1" title={doc.filename}>
+                      {doc.filename}
+                    </p>
+                    <Link
+                      to={`/documents/${doc.id}`}
+                      className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 shrink-0"
+                      onClick={onClose}
+                    >
+                      View <ExternalLink className="h-3 w-3" />
+                    </Link>
+                  </div>
                   <p className="mt-1 text-sm text-red-600 break-words">
                     {doc.error_message || 'Unknown error'}
                   </p>

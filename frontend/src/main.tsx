@@ -14,8 +14,8 @@ const queryClient = new QueryClient({
   },
 })
 
-// Use basename for GitHub Pages deployment
-const basename = window.location.hostname.includes('github.io') ? '/back_tag_web' : ''
+// Use basename for GitHub Pages deployment or when accessing via /back_tag_web/ path
+const basename = window.location.hostname.includes('github.io') || window.location.pathname.startsWith('/back_tag_web') ? '/back_tag_web' : ''
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

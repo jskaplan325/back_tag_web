@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { FileText, CheckCircle, TrendingUp, Clock, Tag, Filter, X, AlertTriangle, SkipForward } from 'lucide-react'
+import { FileText, CheckCircle, TrendingUp, Clock, Tag, Filter, X, AlertTriangle, EyeOff } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { Link } from 'react-router-dom'
 import api from '../api'
@@ -8,7 +8,7 @@ import api from '../api'
 interface DashboardSummary {
   total_documents: number
   total_processed: number
-  total_skipped: number
+  total_ignored: number
   total_failed: number
   avg_confidence: number
   avg_processing_time: number
@@ -123,10 +123,10 @@ export default function Dashboard() {
           color="bg-green-500"
         />
         <StatCard
-          title="Skipped"
-          value={summary?.total_skipped ?? 0}
-          icon={SkipForward}
-          color="bg-gray-400"
+          title="Ignored"
+          value={summary?.total_ignored ?? 0}
+          icon={EyeOff}
+          color="bg-yellow-500"
         />
         <StatCard
           title="Failed"

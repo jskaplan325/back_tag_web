@@ -3,8 +3,6 @@ import { useQuery } from '@tanstack/react-query'
 import {
   LineChart,
   Line,
-  BarChart,
-  Bar,
   PieChart,
   Pie,
   Cell,
@@ -14,7 +12,7 @@ import {
   ResponsiveContainer,
   Legend
 } from 'recharts'
-import { Clock, DollarSign, TrendingUp, Activity, Loader2, Filter, X } from 'lucide-react'
+import { Clock, TrendingUp, Activity, Loader2, Filter, X } from 'lucide-react'
 import api from '../api'
 
 interface DashboardSummary {
@@ -43,11 +41,15 @@ interface ModelUsage {
   approved: boolean
 }
 
-interface CostBreakdown {
-  provider: string
-  model: string
-  total_cost: number
-  total_tokens: number
+interface LeaderboardEntry {
+  rank: number
+  document_name: string
+  document_id: string
+  matter_name: string | null
+  processing_time: number
+  word_count: number | null
+  tag_count: number
+  confidence: number | null
 }
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
@@ -98,12 +100,12 @@ export default function Metrics() {
     queryFn: () => api.get('/api/metrics/models').then(r => r.data),
   })
 
-  const { data: costs, isLoading: costsLoading } = useQuery<CostBreakdown[]>({
-    queryKey: ['metrics', 'costs'],
-    queryFn: () => api.get('/api/metrics/costs').then(r => r.data),
+  const { data: leaderboard, isLoading: leaderboardLoading } = useQuery<LeaderboardEntry[]>({
+    queryKey: ['metrics', 'leaderboard'],
+    queryFn: () => api.get('/api/metrics/leaderboard?limit=10&sort_by=time').then(r => r.data),
   })
 
-  const isLoading = summaryLoading || trendsLoading || usageLoading || costsLoading
+  const isLoading = summaryLoading || trendsLoading || usageLoading || leaderboardLoading
 
   if (isLoading) {
     return (
@@ -112,8 +114,6 @@ export default function Metrics() {
       </div>
     )
   }
-
-  const totalCost = costs?.reduce((sum, c) => sum + c.total_cost, 0) || 0
 
   return (
     <div className="p-8">
@@ -165,11 +165,11 @@ export default function Metrics() {
           subtitle="tag accuracy"
         />
         <StatCard
-          title="Total API Costs"
-          value={`$${totalCost.toFixed(2)}`}
-          icon={DollarSign}
+          title="Tags Detected"
+          value={summary?.total_tags_detected?.toLocaleString() || 0}
+          icon={TrendingUp}
           color="bg-purple-500"
-          subtitle="LLM usage"
+          subtitle="total extractions"
         />
         <StatCard
           title="Success Rate"
@@ -287,31 +287,46 @@ export default function Metrics() {
           </div>
         </div>
 
-        {/* Cost Breakdown */}
+        {/* Processing Leaderboard */}
         <div className="rounded-lg bg-white p-6 shadow">
-          <h2 className="text-lg font-semibold mb-4">API Cost Breakdown</h2>
-          <div className="h-64">
-            {costs && costs.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={costs} layout="vertical">
-                  <XAxis type="number" tickFormatter={(v) => `$${v.toFixed(2)}`} fontSize={12} />
-                  <YAxis
-                    type="category"
-                    dataKey="model"
-                    width={120}
-                    fontSize={12}
-                    tickFormatter={(v) => v.split('/').pop()}
-                  />
-                  <Tooltip formatter={(value: number) => `$${value.toFixed(4)}`} />
-                  <Bar dataKey="total_cost" fill="#8b5cf6" name="Cost" />
-                </BarChart>
-              </ResponsiveContainer>
+          <h2 className="text-lg font-semibold mb-4">Processing Leaderboard</h2>
+          <div className="h-64 overflow-auto">
+            {leaderboard && leaderboard.length > 0 ? (
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 sticky top-0">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium text-gray-500">#</th>
+                    <th className="px-3 py-2 text-left font-medium text-gray-500">Document</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-500">Time</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-500">Words</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {leaderboard.map((entry) => (
+                    <tr key={entry.document_id} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 font-bold text-gray-400">{entry.rank}</td>
+                      <td className="px-3 py-2">
+                        <div className="truncate max-w-[180px]" title={entry.document_name}>
+                          {entry.document_name.length > 25
+                            ? entry.document_name.slice(0, 25) + '...'
+                            : entry.document_name}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-blue-600">
+                        {entry.processing_time >= 60
+                          ? `${Math.floor(entry.processing_time / 60)}m ${(entry.processing_time % 60).toFixed(0)}s`
+                          : `${entry.processing_time.toFixed(1)}s`}
+                      </td>
+                      <td className="px-3 py-2 text-right text-gray-500">
+                        {entry.word_count?.toLocaleString() || '-'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             ) : (
               <div className="flex h-full items-center justify-center text-gray-400">
-                <div className="text-center">
-                  <p>No API costs recorded</p>
-                  <p className="text-sm mt-1">Costs are tracked when using LLM-based zone detection</p>
-                </div>
+                No processing data yet
               </div>
             )}
           </div>

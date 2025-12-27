@@ -15,7 +15,8 @@ import {
   Search,
   ArrowUpDown,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  EyeOff
 } from 'lucide-react'
 import clsx from 'clsx'
 import api from '../api'
@@ -416,12 +417,14 @@ export default function Documents() {
                       doc.status === 'completed' && 'bg-green-100 text-green-700',
                       doc.status === 'failed' && 'bg-red-100 text-red-700',
                       doc.status === 'processing' && 'bg-yellow-100 text-yellow-700',
-                      doc.status === 'uploaded' && 'bg-gray-100 text-gray-700'
+                      doc.status === 'uploaded' && 'bg-gray-100 text-gray-700',
+                      doc.status === 'ignored' && 'bg-yellow-100 text-yellow-700'
                     )}>
                       {doc.status === 'completed' && <CheckCircle className="h-3 w-3" />}
                       {doc.status === 'failed' && <XCircle className="h-3 w-3" />}
                       {doc.status === 'processing' && <Loader2 className="h-3 w-3 animate-spin" />}
                       {doc.status === 'uploaded' && <Clock className="h-3 w-3" />}
+                      {doc.status === 'ignored' && <EyeOff className="h-3 w-3" />}
                       {doc.status}
                     </span>
                   </td>
