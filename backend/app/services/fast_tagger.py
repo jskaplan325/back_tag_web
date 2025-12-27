@@ -323,6 +323,27 @@ def compute_weighted_confidence(
     return round(sum_squared / sum_scores, 3)
 
 
+def _add_word_boundaries(pattern: str) -> str:
+    """
+    Add word boundaries to short patterns that look like whole words/acronyms.
+    This prevents "SEC" from matching "Section" or "NDA" from matching "agenda".
+    """
+    # Check if pattern already has word boundaries or regex special chars
+    has_special = bool(re.search(r'[\\^$.*+?{}[\]|()]', pattern))
+
+    # For short patterns (≤6 chars) that are simple words, add word boundaries
+    if not has_special and len(pattern) <= 6 and pattern.isalpha():
+        return r'\b' + pattern + r'\b'
+
+    # For patterns that look like simple multi-word phrases without boundaries
+    # e.g., "SEC filing" should become "\bSEC filing\b"
+    if not has_special and ' ' not in pattern and pattern.replace('-', '').replace('_', '').isalnum():
+        if len(pattern) <= 10:
+            return r'\b' + pattern + r'\b'
+
+    return pattern
+
+
 def count_pattern_matches(text: str, patterns: List[str]) -> int:
     """Count how many pattern matches are found in text."""
     if not patterns:
@@ -333,7 +354,9 @@ def count_pattern_matches(text: str, patterns: List[str]) -> int:
 
     for pattern in patterns:
         try:
-            matches = re.findall(pattern, text_lower, re.IGNORECASE)
+            # Add word boundaries for short simple patterns
+            safe_pattern = _add_word_boundaries(pattern)
+            matches = re.findall(safe_pattern, text_lower, re.IGNORECASE)
             total_matches += len(matches)
         except re.error:
             # Invalid regex, try as literal
@@ -346,6 +369,7 @@ def find_pattern_matches(text: str, patterns: List[str], max_matches: int = 50) 
     """
     Find pattern matches with their positions in text.
     Returns list of {start, end, text, pattern} dicts for highlighting.
+    Uses word boundaries for short patterns to avoid partial matches.
     """
     if not patterns:
         return []
@@ -353,7 +377,9 @@ def find_pattern_matches(text: str, patterns: List[str], max_matches: int = 50) 
     matches = []
     for pattern in patterns:
         try:
-            for match in re.finditer(pattern, text, re.IGNORECASE):
+            # Add word boundaries for short simple patterns
+            safe_pattern = _add_word_boundaries(pattern)
+            for match in re.finditer(safe_pattern, text, re.IGNORECASE):
                 matches.append({
                     'start': match.start(),
                     'end': match.end(),
@@ -363,7 +389,7 @@ def find_pattern_matches(text: str, patterns: List[str], max_matches: int = 50) 
                 if len(matches) >= max_matches:
                     break
         except re.error:
-            # Invalid regex, try as literal
+            # Invalid regex, try as literal with word boundary check
             pattern_lower = pattern.lower()
             text_lower = text.lower()
             start = 0
@@ -371,6 +397,14 @@ def find_pattern_matches(text: str, patterns: List[str], max_matches: int = 50) 
                 pos = text_lower.find(pattern_lower, start)
                 if pos == -1:
                     break
+                # Check word boundaries for short patterns
+                if len(pattern) <= 6:
+                    # Check if surrounded by word boundaries
+                    before_ok = pos == 0 or not text[pos-1].isalnum()
+                    after_ok = pos + len(pattern) >= len(text) or not text[pos + len(pattern)].isalnum()
+                    if not (before_ok and after_ok):
+                        start = pos + 1
+                        continue
                 matches.append({
                     'start': pos,
                     'end': pos + len(pattern),
