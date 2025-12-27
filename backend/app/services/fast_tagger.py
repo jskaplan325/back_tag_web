@@ -548,6 +548,35 @@ def process_document_fast(
             'status_reason': f'Text extraction failed: {str(e)[:100]}'
         }
 
+    # Step 2.5: Detect scanned/image-only PDFs
+    ext = Path(filepath).suffix.lower()
+    if ext == '.pdf' and not skip_validation:
+        word_count_check = len(text.split()) if text else 0
+        # Get page count for PDFs
+        try:
+            import pdfplumber
+            with pdfplumber.open(filepath) as pdf:
+                page_count = len(pdf.pages)
+        except:
+            page_count = 1
+
+        # Heuristic: If less than 50 words per page, likely scanned
+        words_per_page = word_count_check / max(page_count, 1)
+        if words_per_page < 50 and page_count > 0:
+            return {
+                'tags': [],
+                'tag_count': 0,
+                'word_count': word_count_check,
+                'page_count': page_count,
+                'words_per_page': round(words_per_page, 1),
+                'processing_time_seconds': time.time() - start_time,
+                'average_confidence': 0,
+                'method': 'fast_text_only',
+                'model': model_name,
+                'status': 'needs_ocr',
+                'status_reason': f'Likely scanned PDF: only {words_per_page:.0f} words/page extracted (need OCR)'
+            }
+
     # Step 3: Validate text quality (unless human override)
     if not skip_validation:
         quality_check = validate_text_quality(text)

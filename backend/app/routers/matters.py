@@ -965,6 +965,9 @@ def run_fast_pipeline(document_id: str, filepath: str, skip_validation: bool = F
             elif doc_status == 'ignored':
                 document.status = "ignored"
                 document.error_message = status_reason
+            elif doc_status == 'needs_ocr':
+                document.status = "needs_ocr"
+                document.error_message = status_reason
             else:  # failed
                 document.status = "failed"
                 document.error_message = status_reason
@@ -1099,21 +1102,9 @@ def run_ocr_pipeline(document_id: str, filepath: str):
 
 def run_auto_pipeline(document_id: str, filepath: str, recommended_pipeline: str):
     """Run the recommended pipeline based on document analysis."""
-    # Route to appropriate pipeline based on recommendation
-    if recommended_pipeline == 'fast':
-        run_fast_pipeline(document_id, filepath)
-    elif recommended_pipeline == 'smart' or recommended_pipeline == 'zone':
-        # Zone detection uses LLM, so route to smart pipeline
-        run_smart_pipeline(document_id, filepath)
-    elif recommended_pipeline == 'vision':
-        # Vision pipeline - use OCR for visual content extraction
-        run_ocr_pipeline(document_id, filepath)
-    elif recommended_pipeline == 'ocr':
-        # OCR pipeline using Surya
-        run_ocr_pipeline(document_id, filepath)
-    else:
-        # Default to fast
-        run_fast_pipeline(document_id, filepath)
+    # Always use fast pipeline - it uses E5 embeddings + pdfplumber text extraction
+    # This is the primary processing method (no LLM/Gemini, no slow OCR)
+    run_fast_pipeline(document_id, filepath)
 
 
 def run_smart_pipeline(document_id: str, filepath: str):

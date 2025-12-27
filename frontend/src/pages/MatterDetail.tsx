@@ -88,6 +88,7 @@ const statusConfig: Record<string, { color: string; icon: React.ElementType; lab
   completed: { color: 'text-green-500', icon: CheckCircle, label: 'Completed' },
   failed: { color: 'text-red-500', icon: XCircle, label: 'Failed' },
   ignored: { color: 'text-yellow-500', icon: EyeOff, label: 'Ignored' },
+  needs_ocr: { color: 'text-orange-500', icon: AlertCircle, label: 'Needs OCR' },
 }
 
 function formatBytes(bytes: number): string {
