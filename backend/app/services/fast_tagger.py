@@ -18,25 +18,38 @@ from sentence_transformers import SentenceTransformer
 SUPPORTED_EXTENSIONS = {
     '.pdf', '.txt', '.doc', '.docx', '.rtf',
     '.htm', '.html',  # May contain embedded documents
+    '.json',  # Can contain structured legal data
+}
+
+# Image types - route to OCR pipeline
+OCR_EXTENSIONS = {
+    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.tif',
 }
 
 # Explicitly unsupported - skip without error
 SKIP_EXTENSIONS = {
-    '.css', '.js', '.json', '.xml', '.yaml', '.yml',
-    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg',
-    '.zip', '.tar', '.gz', '.rar',
-    '.exe', '.dll', '.so', '.bin',
-    '.mp3', '.mp4', '.wav', '.avi',
-    '.xls', '.xlsx', '.ppt', '.pptx',  # Could add support later
+    '.css', '.js', '.xml', '.yaml', '.yml',  # Config/code files
+    '.zip', '.tar', '.gz', '.rar', '.7z',    # Archives
+    '.exe', '.dll', '.so', '.bin',           # Binaries
+    '.mp3', '.mp4', '.wav', '.avi', '.mov',  # Media
+    '.svg',                                   # Vector graphics (no text)
+}
+
+# Could support in future with specialized handling
+FUTURE_SUPPORT = {
+    '.xls', '.xlsx',  # Spreadsheets - need tabular extraction
+    '.ppt', '.pptx',  # Presentations - need slide extraction
+    '.eml', '.msg',   # Emails - need header parsing
 }
 
 
 class DocumentQualityResult:
     """Result of document quality validation."""
-    def __init__(self, is_valid: bool, status: str, reason: str = ""):
+    def __init__(self, is_valid: bool, status: str, reason: str = "", pipeline: str = "fast"):
         self.is_valid = is_valid
-        self.status = status  # 'processed', 'skipped', 'failed'
+        self.status = status  # 'processed', 'skipped', 'failed', 'needs_review'
         self.reason = reason
+        self.pipeline = pipeline  # 'fast', 'ocr', 'smart'
 
 
 def check_file_type(filepath: str) -> DocumentQualityResult:
@@ -44,9 +57,13 @@ def check_file_type(filepath: str) -> DocumentQualityResult:
     ext = Path(filepath).suffix.lower()
 
     if ext in SUPPORTED_EXTENSIONS:
-        return DocumentQualityResult(True, 'processed')
+        return DocumentQualityResult(True, 'processed', pipeline='fast')
+    elif ext in OCR_EXTENSIONS:
+        return DocumentQualityResult(True, 'processed', reason='Image file - requires OCR', pipeline='ocr')
     elif ext in SKIP_EXTENSIONS:
         return DocumentQualityResult(False, 'skipped', f'Unsupported file type: {ext}')
+    elif ext in FUTURE_SUPPORT:
+        return DocumentQualityResult(False, 'needs_review', f'File type {ext} may need special handling')
     else:
         # Unknown extension - try to process but may fail
         return DocumentQualityResult(True, 'processed', f'Unknown file type: {ext}')
@@ -108,10 +125,21 @@ def validate_text_quality(text: str, min_words: int = 30) -> DocumentQualityResu
         return DocumentQualityResult(False, 'skipped', 'Code/markup content detected (not a legal document)')
 
     # Check for reasonable prose (sentences, punctuation)
+    # Legal docs often use colons, semi-colons, and numbered lists
     sentence_endings = len(re.findall(r'[.!?]\s', sample))
-    if word_count > 100 and sentence_endings < 3:
-        # Lots of words but no sentences - might be garbage
-        return DocumentQualityResult(False, 'failed', 'No sentence structure detected')
+    legal_punctuation = len(re.findall(r'[;:]\s', sample))
+    list_markers = len(re.findall(r'(?:^|\n)\s*(?:\d+[.)]\s|\([a-z]\)\s|[•·-]\s)', sample))
+
+    # More lenient: accept if we have any structural markers
+    structural_markers = sentence_endings + legal_punctuation + list_markers
+
+    if word_count > 100 and structural_markers < 3:
+        # Lots of words but no structure - might be garbage
+        # But mark as 'needs_review' instead of hard fail for borderline cases
+        if structural_markers == 0 and word_count > 200:
+            return DocumentQualityResult(False, 'failed', 'No sentence structure detected')
+        # Borderline - still process but flag for review
+        return DocumentQualityResult(True, 'processed', 'Low structure detected - may need review')
 
     return DocumentQualityResult(True, 'processed')
 
@@ -121,7 +149,7 @@ _tag_embeddings: Dict[str, np.ndarray] = {}
 _tag_metadata: Dict[str, Dict] = {}
 
 
-def get_model(model_name: str = "pile-of-law/legalbert-large-1.7M-2", force_reload: bool = False) -> SentenceTransformer:
+def get_model(model_name: str = "intfloat/e5-large-v2", force_reload: bool = False) -> SentenceTransformer:
     """Get or initialize the sentence transformer model."""
     global _model
     if _model is None or force_reload:
@@ -135,14 +163,55 @@ def reset_model():
     _model = None
 
 
+def extract_json_text(data: Any, depth: int = 0, max_depth: int = 10) -> List[str]:
+    """
+    Recursively extract text values from JSON data.
+    Returns list of text strings found in the JSON structure.
+    """
+    if depth > max_depth:
+        return []
+
+    texts = []
+
+    if isinstance(data, str):
+        # Only include meaningful text (not UUIDs, paths, etc.)
+        if len(data) > 20 and ' ' in data:
+            texts.append(data)
+    elif isinstance(data, dict):
+        for key, value in data.items():
+            # Skip technical keys
+            if key.lower() in ('id', 'uuid', 'path', 'filepath', 'url', 'href', 'hash', 'checksum'):
+                continue
+            texts.extend(extract_json_text(value, depth + 1, max_depth))
+    elif isinstance(data, list):
+        for item in data:
+            texts.extend(extract_json_text(item, depth + 1, max_depth))
+
+    return texts
+
+
 def extract_text(filepath: str) -> str:
     """Extract text from file using lightweight methods."""
+    import json
+
     path = Path(filepath)
     ext = path.suffix.lower()
 
     if ext == '.txt':
         with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
             return f.read()
+
+    elif ext == '.json':
+        # Extract text from JSON values
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            texts = extract_json_text(data)
+            return '\n\n'.join(texts)
+        except json.JSONDecodeError:
+            # Not valid JSON, try as plain text
+            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                return f.read()
 
     elif ext == '.pdf':
         # Try pdfplumber first (better for tables)
@@ -429,8 +498,9 @@ def tag_text(
 def process_document_fast(
     filepath: str,
     db_session,
-    model_name: str = "pile-of-law/legalbert-large-1.7M-2",
-    threshold: float = 0.45
+    model_name: str = "intfloat/e5-large-v2",
+    threshold: float = 0.45,
+    skip_validation: bool = False
 ) -> Dict[str, Any]:
     """
     Process a document using fast text-only tagging.
@@ -439,6 +509,9 @@ def process_document_fast(
     - 'processed': Successfully tagged (confidence is meaningful)
     - 'skipped': Unsupported file type (not included in metrics)
     - 'failed': Extraction/quality issue (shown as error)
+
+    Args:
+        skip_validation: If True, skip quality checks (human override for edge cases)
     """
     global _tag_embeddings, _tag_metadata
 
@@ -475,20 +548,21 @@ def process_document_fast(
             'status_reason': f'Text extraction failed: {str(e)[:100]}'
         }
 
-    # Step 3: Validate text quality
-    quality_check = validate_text_quality(text)
-    if not quality_check.is_valid:
-        return {
-            'tags': [],
-            'tag_count': 0,
-            'word_count': len(text.split()) if text else 0,
-            'processing_time_seconds': time.time() - start_time,
-            'average_confidence': 0,
-            'method': 'fast_text_only',
-            'model': model_name,
-            'status': quality_check.status,
-            'status_reason': quality_check.reason
-        }
+    # Step 3: Validate text quality (unless human override)
+    if not skip_validation:
+        quality_check = validate_text_quality(text)
+        if not quality_check.is_valid:
+            return {
+                'tags': [],
+                'tag_count': 0,
+                'word_count': len(text.split()) if text else 0,
+                'processing_time_seconds': time.time() - start_time,
+                'average_confidence': 0,
+                'method': 'fast_text_only',
+                'model': model_name,
+                'status': quality_check.status,
+                'status_reason': quality_check.reason
+            }
 
     word_count = len(text.split())
 
@@ -523,7 +597,7 @@ def process_document_fast(
     }
 
 
-def get_taxonomy_embeddings(db_session, model_name: str = "pile-of-law/legalbert-large-1.7M-2"):
+def get_taxonomy_embeddings(db_session, model_name: str = "intfloat/e5-large-v2"):
     """
     Get taxonomy tag embeddings and metadata.
     Used by llm_tagger for smart mode processing.
@@ -545,3 +619,97 @@ def clear_cache():
     _model = None
     _tag_embeddings = {}
     _tag_metadata = {}
+
+
+# ============================================================================
+# Multi-Model Comparison Helpers
+# ============================================================================
+
+def load_model_fresh(model_name: str) -> SentenceTransformer:
+    """
+    Load a model without using singleton cache.
+    Use this for side-by-side model comparison.
+    """
+    return SentenceTransformer(model_name)
+
+
+def compute_embeddings_for_model(
+    model: SentenceTransformer,
+    tags: Dict[str, Dict]
+) -> Dict[str, np.ndarray]:
+    """
+    Compute tag embeddings for a specific model instance.
+    Unlike compute_tag_embeddings(), this doesn't use global state.
+
+    Args:
+        model: A SentenceTransformer model instance
+        tags: Dict of tag definitions with 'examples' key
+
+    Returns:
+        Dict mapping tag names to their averaged embeddings
+    """
+    embeddings = {}
+    for tag_name, tag_def in tags.items():
+        examples = tag_def.get('examples', [])
+        if examples:
+            emb = model.encode(examples, convert_to_numpy=True)
+            embeddings[tag_name] = np.mean(emb, axis=0)
+    return embeddings
+
+
+def score_text_with_model(
+    text: str,
+    model: SentenceTransformer,
+    tag_embeddings: Dict[str, np.ndarray],
+    tag_metadata: Dict[str, Dict],
+    chunk_size: int = 200,
+    chunk_overlap: int = 50
+) -> Dict[str, Dict[str, float]]:
+    """
+    Score text against all tags using a specific model.
+    Returns raw scores without filtering by threshold.
+
+    Args:
+        text: Document text to score
+        model: SentenceTransformer model instance
+        tag_embeddings: Pre-computed tag embeddings for this model
+        tag_metadata: Tag metadata with patterns
+
+    Returns:
+        Dict mapping tag names to {semantic_similarity, pattern_matches, hybrid_confidence}
+    """
+    # Chunk text
+    words = text.split()
+    chunks = []
+    for i in range(0, len(words), chunk_size - chunk_overlap):
+        chunk = ' '.join(words[i:i + chunk_size])
+        if chunk:
+            chunks.append(chunk)
+
+    if not chunks:
+        return {}
+
+    # Encode chunks
+    chunk_embeddings = model.encode(chunks, convert_to_numpy=True)
+
+    # Score each tag
+    scores = {}
+    for tag_name, tag_emb in tag_embeddings.items():
+        # Find max similarity across chunks
+        similarities = [cosine_similarity(chunk_emb, tag_emb) for chunk_emb in chunk_embeddings]
+        max_sim = max(similarities)
+
+        # Get pattern matches
+        patterns = tag_metadata.get(tag_name, {}).get('patterns', [])
+        pattern_count = count_pattern_matches(text, patterns)
+
+        # Compute hybrid confidence
+        hybrid = compute_hybrid_confidence(max_sim, pattern_count)
+
+        scores[tag_name] = {
+            'semantic_similarity': round(max_sim, 4),
+            'pattern_matches': pattern_count,
+            'hybrid_confidence': round(hybrid, 4)
+        }
+
+    return scores

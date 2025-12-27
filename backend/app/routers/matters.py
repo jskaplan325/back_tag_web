@@ -20,7 +20,12 @@ router = APIRouter()
 DATA_DIR = Path(os.getenv("DATA_DIR", "./data"))
 UPLOADS_DIR = DATA_DIR / "uploads"
 
-SUPPORTED_EXTENSIONS = {'.pdf', '.txt', '.doc', '.docx'}
+# Document types we can process
+SUPPORTED_EXTENSIONS = {
+    '.pdf', '.txt', '.doc', '.docx', '.rtf',
+    '.htm', '.html', '.json',  # Text-based
+    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.tif',  # Images -> OCR
+}
 
 
 def compute_weighted_avg(values: List[float], min_threshold: float = 0.5) -> Optional[float]:
@@ -119,8 +124,8 @@ async def list_matters(
     matter_type: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """List all matters with document status counts and average confidence."""
-    from ..database.db import Result
+    """List all matters with document status counts and average confidence (adjusted for feedback)."""
+    from ..database.db import Result, TagFeedback
 
     query = db.query(Matter)
     if matter_type:
@@ -131,19 +136,37 @@ async def list_matters(
     result = []
     for matter in matters:
         docs = db.query(Document).filter(Document.matter_id == matter.id).all()
+        doc_ids = [d.id for d in docs]
         pending = sum(1 for d in docs if d.status == 'uploaded')
         completed = sum(1 for d in docs if d.status == 'completed')
         failed = sum(1 for d in docs if d.status == 'failed')
 
-        # Calculate weighted average confidence from completed documents
-        doc_confidences = []
+        # Get feedback for this matter's documents
+        feedback_list = db.query(TagFeedback).filter(TagFeedback.document_id.in_(doc_ids)).all() if doc_ids else []
+        feedback_map = {(fb.document_id, fb.tag_name): fb.action for fb in feedback_list}
+
+        # Calculate confidence excluding rejected tags
+        all_confidences = []
         for doc in docs:
             if doc.status == 'completed':
                 doc_result = db.query(Result).filter(Result.document_id == doc.id).order_by(Result.processed_at.desc()).first()
-                if doc_result and doc_result.average_confidence:
-                    doc_confidences.append(doc_result.average_confidence)
+                if doc_result and doc_result.result_json and 'tags' in doc_result.result_json:
+                    for tag in doc_result.result_json['tags']:
+                        if isinstance(tag, dict):
+                            tag_name = tag.get('name', tag.get('tag_name', tag.get('tag', '')))
+                            confidence = tag.get('confidence', tag.get('score', 0))
+                        else:
+                            continue
 
-        avg_confidence = compute_weighted_avg(doc_confidences)
+                        fb_action = feedback_map.get((doc.id, tag_name))
+                        if fb_action == 'rejected':
+                            continue  # Skip rejected tags
+                        elif fb_action == 'confirmed':
+                            all_confidences.append(1.0)  # Confirmed = 100%
+                        else:
+                            all_confidences.append(confidence)
+
+        avg_confidence = compute_weighted_avg(all_confidences) if all_confidences else None
 
         result.append(MatterResponse(
             id=matter.id,
@@ -276,6 +299,80 @@ async def retry_failed_documents(
     return {
         "message": f"Queued {len(doc_info)} documents for retry",
         "count": len(doc_info)
+    }
+
+
+@router.get("/{matter_id}/confidence")
+async def get_matter_confidence(matter_id: str, db: Session = Depends(get_db)):
+    """Get matter confidence stats, excluding rejected tags from calculations."""
+    from ..database.db import Result, TagFeedback
+
+    matter = db.query(Matter).filter(Matter.id == matter_id).first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="Matter not found")
+
+    # Get all documents for this matter
+    documents = db.query(Document).filter(Document.matter_id == matter_id).all()
+    doc_ids = [d.id for d in documents]
+
+    # Get all results
+    results = db.query(Result).filter(Result.document_id.in_(doc_ids)).all()
+
+    # Get all feedback for documents in this matter
+    feedback_list = db.query(TagFeedback).filter(TagFeedback.document_id.in_(doc_ids)).all()
+
+    # Create feedback lookup: {(doc_id, tag_name): action}
+    feedback_map = {(fb.document_id, fb.tag_name): fb.action for fb in feedback_list}
+
+    # Calculate confidence excluding rejected tags
+    all_confidences = []
+    confirmed_count = 0
+    rejected_count = 0
+    pending_count = 0
+
+    for result in results:
+        if result.result_json and 'tags' in result.result_json:
+            for tag in result.result_json['tags']:
+                if isinstance(tag, dict):
+                    tag_name = tag.get('name', tag.get('tag_name', tag.get('tag', '')))
+                    confidence = tag.get('confidence', tag.get('score', 0))
+                else:
+                    continue
+
+                # Check feedback status
+                fb_key = (result.document_id, tag_name)
+                feedback_action = feedback_map.get(fb_key)
+
+                if feedback_action == 'rejected':
+                    rejected_count += 1
+                    # Don't include rejected tags in confidence calculation
+                    continue
+                elif feedback_action == 'confirmed':
+                    confirmed_count += 1
+                    # Confirmed tags count as 100% confidence
+                    all_confidences.append(1.0)
+                else:
+                    pending_count += 1
+                    # Unreviewed tags use ML confidence
+                    all_confidences.append(confidence)
+
+    # Calculate overall confidence
+    if all_confidences:
+        avg_confidence = compute_weighted_avg(all_confidences)
+    else:
+        avg_confidence = None
+
+    total_tags = confirmed_count + rejected_count + pending_count
+    reviewed_tags = confirmed_count + rejected_count
+
+    return {
+        "matter_id": matter_id,
+        "overall_confidence": avg_confidence,
+        "total_tags": total_tags,
+        "confirmed_tags": confirmed_count,
+        "rejected_tags": rejected_count,
+        "pending_review": pending_count,
+        "review_progress": round(reviewed_tags / total_tags, 2) if total_tags > 0 else 0
     }
 
 
@@ -794,22 +891,27 @@ class BatchProcessRequest(BaseModel):
     auto_mode: bool = False  # Use recommended pipeline from document analysis
 
 
-def run_fast_pipeline(document_id: str, filepath: str):
+def run_fast_pipeline(document_id: str, filepath: str, skip_validation: bool = False):
     """Run fast text-only tagging pipeline."""
     from ..database.db import SessionLocal, Document, Result, Model, ModelUsage
     from ..services.fast_tagger import process_document_fast
     import uuid
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"[PIPELINE] Starting fast pipeline for {document_id}: {filepath} (skip_validation={skip_validation})")
 
     db = SessionLocal()
     try:
-        result_data = process_document_fast(filepath, db)
+        result_data = process_document_fast(filepath, db, skip_validation=skip_validation)
+        logger.info(f"[PIPELINE] Fast pipeline result for {document_id}: status={result_data.get('status')}, confidence={result_data.get('average_confidence')}")
 
         # Check processing status from quality validation
         doc_status = result_data.get('status', 'processed')
         status_reason = result_data.get('status_reason', '')
 
         # Get model name from result or default
-        model_name = result_data.get('model', 'pile-of-law/legalbert-large-1.7M-2')
+        model_name = result_data.get('model', 'intfloat/e5-large-v2')
         processing_time = result_data.get('processing_time_seconds', 0)
 
         # Create result record (even for skipped/failed - for audit trail)
@@ -868,8 +970,10 @@ def run_fast_pipeline(document_id: str, filepath: str):
                 document.error_message = status_reason
 
         db.commit()
+        logger.info(f"[PIPELINE] Completed fast pipeline for {document_id}: final_status={doc_status}")
 
     except Exception as e:
+        logger.error(f"[PIPELINE] Fast pipeline FAILED for {document_id}: {e}", exc_info=True)
         # Mark as failed
         document = db.query(Document).filter(Document.id == document_id).first()
         if document:
@@ -884,7 +988,7 @@ def run_fast_pipeline(document_id: str, filepath: str):
 def run_ocr_pipeline(document_id: str, filepath: str):
     """Run OCR pipeline using Surya for scanned documents."""
     from ..database.db import SessionLocal, Document, Result, Model, ModelUsage
-    from ..services.surya_ocr import extract_text_from_pdf, extract_text_from_image_file, SURYA_AVAILABLE
+    from ..services.surya_ocr import extract_text_from_pdf, extract_text_from_image_file, check_surya_available
     from ..services.fast_tagger import (
         get_model, load_taxonomy_tags, compute_tag_embeddings,
         tag_text, compute_weighted_confidence
@@ -898,7 +1002,7 @@ def run_ocr_pipeline(document_id: str, filepath: str):
         ext = Path(filepath).suffix.lower()
 
         # Extract text using Surya OCR
-        if not SURYA_AVAILABLE:
+        if not check_surya_available():
             raise ImportError("Surya OCR not available. Install: pip install surya-ocr")
 
         if ext == '.pdf':
@@ -913,7 +1017,7 @@ def run_ocr_pipeline(document_id: str, filepath: str):
         ocr_confidence = ocr_result.avg_confidence
 
         # Now run semantic tagging on extracted text
-        model_name = "pile-of-law/legalbert-large-1.7M-2"
+        model_name = "intfloat/e5-large-v2"
         model = get_model(model_name)
         tag_metadata = load_taxonomy_tags(db)
         tag_embeddings = compute_tag_embeddings(tag_metadata, model)
@@ -1146,7 +1250,7 @@ async def process_batch(
         mode_msg = "fast text-only"
     else:
         # Full pipeline with PDF conversion
-        semantic_model = "pile-of-law/legalbert-large-1.7M-2"
+        semantic_model = "intfloat/e5-large-v2"
         enable_vision = False
         vision_model = "microsoft/Florence-2-base"
 
@@ -1231,7 +1335,7 @@ async def process_selected_matters(
         mode_msg = "fast text-only"
     else:
         from ..routers.documents import run_pipeline
-        semantic_model = "pile-of-law/legalbert-large-1.7M-2"
+        semantic_model = "intfloat/e5-large-v2"
         enable_vision = False
         vision_model = "microsoft/Florence-2-base"
 
