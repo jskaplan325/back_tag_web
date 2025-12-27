@@ -314,7 +314,7 @@ def compare_document_raw(
     models: Dict,
     embeddings: Dict[str, Dict],
     tags: Dict,
-    threshold: float = 0.45
+    threshold: float = 0.65  # Raised for E5 model
 ) -> Dict:
     """Compare model scores for a document without feedback - raw score comparison."""
     from app.services.fast_tagger import extract_text, score_text_with_model
@@ -383,7 +383,7 @@ def print_raw_comparison(comp: Dict):
 
     # Summary
     above = comp["above_threshold"]
-    print(f"Tags above threshold (0.45): LegalBERT={above.get('legalbert', 0)}, E5={above.get('e5', 0)}, BGE={above.get('bge', 0)}")
+    print(f"Tags above threshold (0.65): LegalBERT={above.get('legalbert', 0)}, E5={above.get('e5', 0)}, BGE={above.get('bge', 0)}")
 
     # Detailed scores - 3 models
     print(f"\n{'Tag':<28} | {'LegalBERT':>9} | {'E5':>9} | {'BGE':>9} | {'E5 Δ':>7} | {'BGE Δ':>7}")
@@ -427,7 +427,7 @@ def print_raw_summary(all_comparisons: List[Dict]):
             bge_deltas.append(ts.get("bge_delta", 0))
 
     print(f"\nDocuments analyzed: {valid_docs}")
-    print(f"\nTags above threshold (0.45):")
+    print(f"\nTags above threshold (0.65):")
     print(f"  LegalBERT: {total_above['legalbert']}")
     print(f"  E5:        {total_above['e5']}")
     print(f"  BGE:       {total_above['bge']}")
