@@ -636,7 +636,7 @@ def process_document_fast(
         _tag_metadata = load_taxonomy_tags(db_session)
         _tag_embeddings = compute_tag_embeddings(_tag_metadata, model)
 
-    # Step 5: Tag text
+    # Step 5: Tag text with E5 embeddings
     tags = tag_text(
         text,
         model,
@@ -645,19 +645,62 @@ def process_document_fast(
         threshold=threshold
     )
 
+    avg_confidence = compute_weighted_confidence(tags)
+
+    # Step 6: Stage 2 LLM refinement for borderline confidence (0.70-0.75)
+    llm_metadata = {
+        'llm_used': False,
+        'llm_model': None,
+        'llm_processing_time': 0,
+        'llm_trigger_reason': None
+    }
+
+    try:
+        from .llm_tagger import refine_tags_with_llm, LLM_TRIGGER_MIN, LLM_TRIGGER_MAX
+
+        if LLM_TRIGGER_MIN <= avg_confidence < LLM_TRIGGER_MAX:
+            llm_result = refine_tags_with_llm(text, tags)
+            if llm_result.get('llm_used'):
+                tags = llm_result['tags']
+                avg_confidence = llm_result.get('avg_confidence_after', avg_confidence)
+                llm_metadata = {
+                    'llm_used': True,
+                    'llm_model': llm_result.get('llm_model'),
+                    'llm_processing_time': llm_result.get('llm_processing_time', 0),
+                    'llm_trigger_reason': llm_result.get('trigger_reason'),
+                    'llm_confidence_before': llm_result.get('avg_confidence_before'),
+                    'llm_confidence_after': llm_result.get('avg_confidence_after')
+                }
+            else:
+                llm_metadata['llm_trigger_reason'] = llm_result.get('trigger_reason') or llm_result.get('llm_error')
+        else:
+            if avg_confidence >= LLM_TRIGGER_MAX:
+                llm_metadata['llm_trigger_reason'] = f'Skipped: confidence {avg_confidence:.0%} >= {LLM_TRIGGER_MAX:.0%}'
+            else:
+                llm_metadata['llm_trigger_reason'] = f'Skipped: confidence {avg_confidence:.0%} < {LLM_TRIGGER_MIN:.0%}'
+    except ImportError:
+        llm_metadata['llm_trigger_reason'] = 'LLM module not available'
+    except Exception as e:
+        llm_metadata['llm_trigger_reason'] = f'LLM error: {str(e)[:50]}'
+
     processing_time = time.time() - start_time
 
-    return {
+    result = {
         'tags': tags,
         'tag_count': len(tags),
         'word_count': word_count,
         'processing_time_seconds': processing_time,
-        'average_confidence': compute_weighted_confidence(tags),
+        'average_confidence': avg_confidence,
         'method': 'fast_text_only',
         'model': model_name,
         'status': 'processed',
         'status_reason': ''
     }
+
+    # Merge LLM metadata
+    result.update(llm_metadata)
+
+    return result
 
 
 def get_taxonomy_embeddings(db_session, model_name: str = "intfloat/e5-large-v2"):

@@ -326,3 +326,221 @@ def get_available_backend() -> Optional[str]:
     elif GEMINI_AVAILABLE and os.getenv('GOOGLE_API_KEY'):
         return 'gemini (gemini-2.0-flash)'
     return None
+
+
+# =============================================================================
+# STAGE 2: LLM REFINEMENT FOR BORDERLINE TAGS
+# =============================================================================
+
+# Confidence thresholds for LLM trigger
+LLM_TRIGGER_MIN = 0.70  # Minimum confidence to trigger LLM review
+LLM_TRIGGER_MAX = 0.75  # Maximum confidence (above this, skip LLM)
+
+
+def should_trigger_llm_refinement(avg_confidence: float, tags: List[Dict]) -> bool:
+    """
+    Determine if Stage 2 LLM refinement should be triggered.
+
+    Criteria:
+    - Average confidence is between 0.70 and 0.75 (borderline)
+    """
+    return LLM_TRIGGER_MIN <= avg_confidence < LLM_TRIGGER_MAX
+
+
+def build_refinement_prompt(text_snippet: str, tags: List[Dict]) -> str:
+    """
+    Build the prompt for LLM tag refinement (Stage 2).
+
+    Args:
+        text_snippet: First ~3000 chars of document text
+        tags: List of tags from E5 with confidence scores
+    """
+    # Format tags for the prompt
+    tag_list = []
+    for t in tags:
+        name = t.get('name') or t.get('tag_name') or t.get('tag', '')
+        conf = t.get('confidence', 0)
+        area = t.get('area', 'Unknown')
+        tag_list.append(f"- {name} (confidence: {conf:.0%}, area: {area})")
+
+    tags_str = "\n".join(tag_list)
+
+    prompt = f"""You are a legal document classifier. Review the suggested tags for this document and determine which are correct.
+
+DOCUMENT EXCERPT:
+{text_snippet[:3000]}
+
+SUGGESTED TAGS (from embedding similarity):
+{tags_str}
+
+TASK:
+For each tag, respond with:
+1. CONFIRM if the tag is appropriate for this document
+2. REJECT if the tag does not apply
+3. Brief reasoning (1 sentence)
+
+Focus especially on tags with confidence between 70-75% as these are borderline.
+
+Respond in JSON format ONLY:
+{{"refinements": [{{"tag": "Tag Name", "action": "CONFIRM", "reason": "Brief explanation"}}], "summary": "Document type summary"}}"""
+
+    return prompt
+
+
+def parse_refinement_response(response_text: str, original_tags: List[Dict]) -> List[Dict]:
+    """
+    Parse LLM refinement response and apply to tags.
+
+    Args:
+        response_text: Raw LLM response
+        original_tags: Original tags from E5
+
+    Returns:
+        Refined tags with LLM feedback
+    """
+    import re
+
+    refined_tags = []
+
+    try:
+        # Clean up response
+        text = response_text.strip()
+        text = re.sub(r'^```json?\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+
+        # Find JSON
+        json_match = re.search(r'\{[\s\S]*\}', text)
+        if json_match:
+            data = json.loads(json_match.group())
+            refinements = {r["tag"]: r for r in data.get("refinements", [])}
+
+            for tag in original_tags:
+                tag_copy = tag.copy()
+                tag_name = tag.get("name") or tag.get("tag_name") or tag.get("tag", "")
+
+                if tag_name in refinements:
+                    ref = refinements[tag_name]
+                    action = ref.get("action", "").upper()
+                    reason = ref.get("reason", "")
+
+                    tag_copy["llm_action"] = action
+                    tag_copy["llm_reason"] = reason
+
+                    if action == "REJECT":
+                        tag_copy["llm_rejected"] = True
+                        # Lower confidence for rejected tags
+                        tag_copy["confidence"] = min(tag_copy.get("confidence", 0.5), 0.5)
+                    elif action == "CONFIRM":
+                        tag_copy["llm_confirmed"] = True
+                        # Boost confidence for confirmed tags
+                        tag_copy["confidence"] = min(tag_copy.get("confidence", 0.7) + 0.1, 0.99)
+
+                refined_tags.append(tag_copy)
+        else:
+            # No JSON found, return originals
+            refined_tags = [t.copy() for t in original_tags]
+
+    except (json.JSONDecodeError, KeyError) as e:
+        # Return originals with error note
+        for tag in original_tags:
+            tag_copy = tag.copy()
+            tag_copy["llm_error"] = f"Parse error: {str(e)}"
+            refined_tags.append(tag_copy)
+
+    return refined_tags
+
+
+def refine_tags_with_llm(
+    text: str,
+    tags: List[Dict],
+    model: str = None,
+    force: bool = False
+) -> Dict[str, Any]:
+    """
+    Stage 2: Refine E5 tags using LLM for borderline confidence cases.
+
+    Args:
+        text: Full document text
+        tags: Tags from E5 Stage 1
+        model: Ollama model to use (default: qwen2.5:7b)
+        force: Force LLM even if confidence is high
+
+    Returns:
+        Dict with refined tags and metadata
+    """
+    model = model or OLLAMA_MODEL
+    start_time = time.time()
+
+    # Calculate average confidence
+    confidences = [t.get("confidence", 0) for t in tags]
+    avg_confidence = sum(confidences) / len(confidences) if confidences else 0
+
+    result = {
+        "tags": tags,
+        "llm_used": False,
+        "llm_model": None,
+        "llm_processing_time": 0,
+        "llm_error": None,
+        "avg_confidence_before": round(avg_confidence, 3),
+        "trigger_reason": None
+    }
+
+    # Check if we should trigger LLM
+    if not force and not should_trigger_llm_refinement(avg_confidence, tags):
+        if avg_confidence >= LLM_TRIGGER_MAX:
+            result["trigger_reason"] = f"Skipped: confidence {avg_confidence:.0%} >= {LLM_TRIGGER_MAX:.0%}"
+        else:
+            result["trigger_reason"] = f"Skipped: confidence {avg_confidence:.0%} < {LLM_TRIGGER_MIN:.0%}"
+        return result
+
+    result["trigger_reason"] = f"Triggered: confidence {avg_confidence:.0%} in range {LLM_TRIGGER_MIN:.0%}-{LLM_TRIGGER_MAX:.0%}"
+
+    # Check if Ollama is available
+    if not check_ollama_available():
+        result["llm_error"] = "Ollama not available"
+        return result
+
+    # Build prompt and call LLM
+    prompt = build_refinement_prompt(text, tags)
+
+    try:
+        response_text = call_ollama(prompt, model)
+
+        result["tags"] = parse_refinement_response(response_text, tags)
+        result["llm_used"] = True
+        result["llm_model"] = model
+        result["llm_raw_response"] = response_text
+
+        # Calculate new average confidence
+        new_confidences = [t.get("confidence", 0) for t in result["tags"]]
+        result["avg_confidence_after"] = round(sum(new_confidences) / len(new_confidences), 3) if new_confidences else 0
+
+    except Exception as e:
+        result["llm_error"] = str(e)
+
+    result["llm_processing_time"] = round(time.time() - start_time, 2)
+
+    return result
+
+
+def get_llm_status() -> Dict[str, Any]:
+    """Get status of LLM service for health checks and UI display."""
+    status = {
+        "available": False,
+        "model": OLLAMA_MODEL,
+        "url": OLLAMA_BASE_URL,
+        "trigger_range": f"{LLM_TRIGGER_MIN:.0%} - {LLM_TRIGGER_MAX:.0%}",
+        "stage2_enabled": True
+    }
+
+    try:
+        response = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5)
+        if response.status_code == 200:
+            models = response.json().get("models", [])
+            status["available"] = True
+            status["installed_models"] = [m.get("name") for m in models]
+            status["qwen_ready"] = check_ollama_available()
+    except Exception as e:
+        status["error"] = str(e)
+
+    return status

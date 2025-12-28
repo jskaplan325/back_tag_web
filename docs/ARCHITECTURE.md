@@ -30,30 +30,64 @@ Document → Quick Scan → Process
         ▼                   ▼
   ┌─────────────────────────────────────────────────────────┐
   │                    MODEL REGISTRY                       │
+  │                                                         │
   │  ┌─────────────────────────────────────────────────┐   │
-  │  │ Semantic (Embeddings) - ACTIVE                  │   │
+  │  │ EMBEDDING MODELS (Vector Similarity)            │   │
+  │  │ ─────────────────────────────────────────────── │   │
+  │  │ Purpose: Convert text → numerical vectors for   │   │
+  │  │ fast similarity comparison via cosine distance  │   │
+  │  │                                                 │   │
   │  │ • intfloat/e5-large-v2 [HF] ← current default  │   │
+  │  │   └─ 1024-dim vectors, ~1.3GB, general-purpose │   │
   │  │ • pile-of-law/legalbert-large-1.7M-2 [HF]      │   │
+  │  │   └─ 1024-dim, ~1.3GB, legal domain trained    │   │
   │  │ • BAAI/bge-large-en-v1.5 [HF]                  │   │
+  │  │   └─ 1024-dim, ~1.3GB, strong retrieval        │   │
+  │  │                                                 │   │
+  │  │ Speed: ~0.1-0.5s per document (GPU)            │   │
+  │  │ Use: Stage 1 fast classification               │   │
   │  └─────────────────────────────────────────────────┘   │
+  │                                                         │
+  │  ┌─────────────────────────────────────────────────┐   │
+  │  │ LLM MODELS (Generative AI)                      │   │
+  │  │ ─────────────────────────────────────────────── │   │
+  │  │ Purpose: Understand context, reason about text, │   │
+  │  │ and generate structured responses with logic    │   │
+  │  │                                                 │   │
+  │  │ • Ollama/qwen2.5:7b [Local] ← preferred        │   │
+  │  │   └─ 7B params, ~4.7GB, strong reasoning       │   │
+  │  │ • Ollama/llama3.1:8b [Local]                   │   │
+  │  │   └─ 8B params, ~4.7GB, good general purpose   │   │
+  │  │ • Ollama/mistral:7b [Local]                    │   │
+  │  │   └─ 7B params, ~4.1GB, fast inference         │   │
+  │  │                                                 │   │
+  │  │ Speed: ~2-5s per query (GPU)                   │   │
+  │  │ Use: Stage 2 refinement for borderline tags    │   │
+  │  └─────────────────────────────────────────────────┘   │
+  │                                                         │
+  │  ┌─────────────────────────────────────────────────┐   │
+  │  │ COMPARISON: Embedding vs LLM                    │   │
+  │  │ ─────────────────────────────────────────────── │   │
+  │  │                 Embedding        LLM            │   │
+  │  │ Output:         Vectors          Text           │   │
+  │  │ Reasoning:      None             Yes            │   │
+  │  │ Speed:          Very Fast        Slower         │   │
+  │  │ Memory:         ~1-2GB           ~5-8GB         │   │
+  │  │ Best for:       Similarity       Understanding  │   │
+  │  └─────────────────────────────────────────────────┘   │
+  │                                                         │
   │  ┌─────────────────────────────────────────────────┐   │
   │  │ Text Extraction - ACTIVE                        │   │
   │  │ • pdfplumber [Python] ← fast, reliable         │   │
   │  │ • python-docx [Python]                         │   │
   │  └─────────────────────────────────────────────────┘   │
   │  ┌─────────────────────────────────────────────────┐   │
-  │  │ OCR (Future/Manual) - AVAILABLE                 │   │
+  │  │ OCR (On-Demand) - AVAILABLE                     │   │
   │  │ • datalab-to/surya [GitHub] (~2 min/page CPU)  │   │
   │  │   └─ GPU: ~5-10s/page (CUDA/MPS)               │   │
   │  └─────────────────────────────────────────────────┘   │
-  │  ┌─────────────────────────────────────────────────┐   │
-  │  │ LLM Backend (Future Smart Mode) - PLANNED       │   │
-  │  │ • Ollama/qwen2.5:7b [Local] ← preferred        │   │
-  │  │ • Ollama/llama3.1:8b [Local]                   │   │
-  │  │ • Ollama/mistral:7b [Local]                    │   │
-  │  └─────────────────────────────────────────────────┘   │
   │                                                         │
-  │  Status: E5 Active • LLM Planned • OCR On-Demand       │
+  │  Status: E5 Active • Qwen Active • OCR On-Demand       │
   └─────────────────────────────────────────────────────────┘
 ```
 
@@ -78,7 +112,7 @@ Document → Quick Scan → Process
 └─────────────────────────────────────────────────────────┘
 ```
 
-### Stage 2: Smart Mode (LLM) - PLANNED
+### Stage 2: Smart Mode (LLM) - ACTIVE
 
 ```
 ┌─────────────────────────────────────────────────────────┐
