@@ -254,6 +254,7 @@ Where:
 
 ### Integrations
 - [ ] **MatterMgmt DB Integration** - Pull Matter Number and Area of Law from existing Matter Management system to auto-populate matter metadata and improve tag suggestions based on known practice area
+- [ ] **DMS API Framework Connection** *(depends on MatterMgmt integration)* - Connect to Document Management System API to automatically pull matters and documents to a DFS share for batch processing, enabling seamless integration with existing document workflows
 
 ### Potential Enhancements
 - [ ] Multi-language support
