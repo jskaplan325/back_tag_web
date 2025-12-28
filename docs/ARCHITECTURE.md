@@ -37,12 +37,8 @@ Document → Quick Scan → Process
   │  │ Purpose: Convert text → numerical vectors for   │   │
   │  │ fast similarity comparison via cosine distance  │   │
   │  │                                                 │   │
-  │  │ • intfloat/e5-large-v2 [HF] ← current default  │   │
+  │  │ • intfloat/e5-large-v2 [HF] ← active           │   │
   │  │   └─ 1024-dim vectors, ~1.3GB, general-purpose │   │
-  │  │ • pile-of-law/legalbert-large-1.7M-2 [HF]      │   │
-  │  │   └─ 1024-dim, ~1.3GB, legal domain trained    │   │
-  │  │ • BAAI/bge-large-en-v1.5 [HF]                  │   │
-  │  │   └─ 1024-dim, ~1.3GB, strong retrieval        │   │
   │  │                                                 │   │
   │  │ Speed: ~0.1-0.5s per document (GPU)            │   │
   │  │ Use: Stage 1 fast classification               │   │

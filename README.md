@@ -70,7 +70,6 @@ Document → Extract Text → E5 Embeddings → Confidence Check
 | Type | Model | Size | Purpose |
 |------|-------|------|---------|
 | **Embedding** | intfloat/e5-large-v2 | 1.3GB | Stage 1: Fast similarity |
-| **Embedding** | pile-of-law/legalbert | 1.3GB | Alternative (legal domain) |
 | **LLM** | qwen2.5:7b | 4.7GB | Stage 2: Tag refinement |
 | **OCR** | surya | - | Scanned PDF extraction |
 
