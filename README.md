@@ -1,237 +1,178 @@
-# Document Intelligence Dashboard
+# Back Tag v0.3.0 - Document Intelligence Dashboard
 
-Web dashboard for the Document Intelligence Pipeline. Provides a visual interface for:
-- Document upload and processing
-- Visual page review (charts, tables, images)
-- Model registry with HuggingFace integration
-- Processing metrics and cost tracking
+Web dashboard for legal document classification using a two-stage AI pipeline.
+
+## Features
+
+- **Two-Stage AI Pipeline**: E5 embeddings + Qwen LLM refinement
+- **8 Legal Tag Categories**: Investment Funds, M&A, Securities, Real Estate, IP, Employment, Litigation, Regulatory
+- **Smart Pattern Matching**: Word-boundary aware regex patterns
+- **Scanned PDF Detection**: Auto-flags documents needing OCR
+- **Matter Management**: Organize documents by matter/case
 
 ## Architecture
 
 ```
 back_tag_web/
-├── backend/          # FastAPI server
+├── backend/              # FastAPI server
 │   ├── app/
-│   │   ├── main.py           # FastAPI app
-│   │   ├── routers/          # API endpoints
-│   │   ├── models/           # Pydantic schemas
-│   │   ├── services/         # Business logic
-│   │   └── database/         # SQLAlchemy models
-│   └── requirements.txt
-├── frontend/         # React app
-│   ├── src/
-│   │   ├── pages/
-│   │   ├── components/
-│   │   └── App.tsx
-│   └── package.json
-├── data/
-│   ├── uploads/      # Uploaded PDFs
-│   └── results/      # Processing results
-└── docker-compose.yml
+│   │   ├── main.py              # FastAPI app
+│   │   ├── routers/             # API endpoints
+│   │   ├── services/
+│   │   │   ├── fast_tagger.py   # E5 embedding pipeline
+│   │   │   └── llm_tagger.py    # Qwen LLM refinement
+│   │   └── database/            # SQLAlchemy models
+│   └── start.sh                 # Server start script
+├── frontend/             # React + TypeScript
+│   └── src/pages/               # Dashboard pages
+├── docs/
+│   ├── ARCHITECTURE.md          # Full technical docs
+│   └── ARCHITECTURE.html        # Printable version
+└── data/
+    ├── uploads/                 # Uploaded documents
+    └── dashboard.db             # SQLite database
 ```
 
-## Processing Architecture
+## Two-Stage Processing Pipeline
 
 ```
-Document → Quick Scan → Select Pipeline
-                ↓
-           ┌─────────────────────────────────────┐
-           │ Detect:                             │
-           │ • File type (PDF/TXT/DOCX/image)    │
-           │ • Page count                        │
-           │ • Has visual content (charts/tables)│
-           │ • Text density (sparse = needs OCR) │
-           │ • Document structure (has sections) │
-           └─────────────────────────────────────┘
-                ↓
-      ┌─────────┴─────────┬──────────────┐
-      ↓                   ↓              ↓
-  Text-heavy          Long/Structured   Visual/Scanned
-  (agreements)        (SEC filings)     (charts, images)
-      ↓                   ↓              ↓
-  Fast Pipeline       Zone + Smart     Vision + OCR + Tag
-  (~3s)               (~10s)           (~15s)
-      │                   │              │
-      ▼                   ▼              ▼
-┌─────────────────────────────────────────────────────────┐
-│                    MODEL REGISTRY                       │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │ Semantic (Embeddings)                           │   │
-│  │ • pile-of-law/legalbert-large-1.7M-2 [HF]      │   │
-│  │ • Qwen/Qwen2.5-7B-Instruct [HF/Ollama]         │   │
-│  └─────────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │ Vision (Image Analysis)                         │   │
-│  │ • microsoft/Florence-2-large [HF]              │   │
-│  │ • microsoft/Florence-2-base [HF]               │   │
-│  └─────────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │ OCR (Text Extraction)                           │   │
-│  │ • datalab-to/surya [GitHub]                    │   │
-│  └─────────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │ LLM (Smart Tagging)                             │   │
-│  │ • Ollama/qwen2.5:7b [Local] ← preferred        │   │
-│  │ • gemini-2.0-flash [Google API]                │   │
-│  │ • gpt-4o-mini [OpenAI API]                     │   │
-│  └─────────────────────────────────────────────────┘   │
-│                                                         │
-│  Status: [RAI Approved] [Pending Review]               │
-└─────────────────────────────────────────────────────────┘
+Document → Extract Text → E5 Embeddings → Confidence Check
+                                              ↓
+                                    ┌─────────┴─────────┐
+                                    ↓                   ↓
+                              conf ≥ 0.75          0.70 ≤ conf < 0.75
+                              or conf < 0.70           (borderline)
+                                    ↓                   ↓
+                                  DONE             Stage 2: LLM
+                                                        ↓
+                                              ┌─────────────────┐
+                                              │ Ollama/Qwen 7B  │
+                                              │ Confirm/Reject  │
+                                              └─────────────────┘
+                                                        ↓
+                                                      DONE
 ```
 
-### Pipeline Modes
+### Stage 1: E5 Embeddings (Always Runs)
+- **Model**: intfloat/e5-large-v2
+- **Method**: Cosine similarity + pattern matching
+- **Speed**: ~2-5s per document
+- **Threshold**: 0.65 minimum confidence
 
-**Fast Mode (Pattern + Semantic)** - ~3 sec
-- Extract text → LegalBERT embeddings → Pattern match + cosine similarity
-- Local only, good for standard documents
+### Stage 2: LLM Refinement (Conditional)
+- **Model**: Ollama/qwen2.5:7b
+- **Trigger**: Average confidence 70-75%
+- **Action**: Confirms or rejects borderline tags
+- **Speed**: +10-15s when triggered (~16% of docs)
 
-**Smart Mode (LLM-based)** - ~8-15 sec
-- Extract text → Ollama/Gemini LLM → Structured JSON tag response
-- Local (Ollama) or API, better accuracy for complex documents
+## Model Registry
 
-**Vision Mode (Visual Page Detection)** - +5-10 sec
-- Render pages → Florence-2 vision → Classify charts/tables/diagrams
-- Flags visual content for human review
-
-### Pipeline Selection Logic
-
-| Document Type   | Indicators                  | Pipeline         |
-|-----------------|-----------------------------|------------------|
-| Text agreement  | .txt, PDF high text density | Fast Mode        |
-| Complex legal   | Nuanced language, ambiguous | Smart Mode       |
-| Long SEC filing | PDF, 50+ pages, ITEM headers| Zone → Smart     |
-| Visual report   | PDF with images/charts      | Vision → Tag     |
-| Scanned doc     | PDF with low text extraction| Surya OCR → Tag  |
-
-### LLM Backend Priority
-
-1. **Ollama (Local)** - Free, private, ~7GB RAM
-2. **Gemini (API)** - Free tier, then $0.075/1M tokens
-3. **OpenAI (API)** - $0.15/1M input, $0.60/1M output
+| Type | Model | Size | Purpose |
+|------|-------|------|---------|
+| **Embedding** | intfloat/e5-large-v2 | 1.3GB | Stage 1: Fast similarity |
+| **Embedding** | pile-of-law/legalbert | 1.3GB | Alternative (legal domain) |
+| **LLM** | qwen2.5:7b | 4.7GB | Stage 2: Tag refinement |
+| **OCR** | surya | - | Scanned PDF extraction |
 
 ## Quick Start
 
 ### Prerequisites
 
-- Python 3.8+
+- Python 3.9+
 - Node.js 18+
-- back_tag package (document intelligence pipeline)
+- Ollama (for LLM refinement)
 
-### Backend Setup
+### 1. Install Ollama & Qwen
+
+```bash
+# macOS
+brew install ollama
+brew services start ollama
+ollama pull qwen2.5:7b
+```
+
+### 2. Backend Setup
 
 ```bash
 cd backend
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Install back_tag from sibling directory
-pip install -e ../../back_tag
-
-# Run server
-uvicorn app.main:app --reload --port 8000
+./start.sh
 ```
 
-### Frontend Setup
+### 3. Frontend Setup
 
 ```bash
 cd frontend
-
-# Install dependencies
 npm install
-
-# Run development server
 npm run dev
 ```
 
-### Access
+### 4. Access
 
-- Frontend: http://localhost:5173
-- Backend API: http://localhost:8000
-- API Docs: http://localhost:8000/docs
+- **Dashboard**: http://localhost:5173/back_tag_web
+- **API Docs**: http://localhost:8000/docs
+
+## Document Status Flow
+
+| Status | Description | UI Color |
+|--------|-------------|----------|
+| `uploaded` | Pending processing | Gray |
+| `processing` | Currently analyzing | Blue |
+| `completed` | Successfully tagged | Green |
+| `failed` | Processing error | Red |
+| `ignored` | Manually dismissed | Yellow |
+| `needs_ocr` | Scanned PDF detected | Orange |
 
 ## API Endpoints
 
 ### Documents
-- `POST /api/documents/upload` - Upload PDF
-- `GET /api/documents` - List documents
-- `POST /api/documents/{id}/process` - Process document
-- `GET /api/documents/{id}/pages/{page}` - Get page image
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/documents` | List all documents |
+| GET | `/api/documents/{id}` | Get document details |
+| POST | `/api/documents/{id}/process` | Process document |
+| POST | `/api/documents/{id}/ignore` | Mark as ignored |
 
-### Results
-- `GET /api/results` - List results
-- `GET /api/results/{id}` - Get result details
-- `GET /api/results/{id}/tags` - Get tag breakdown
-
-### Models
-- `GET /api/models` - List registered models
-- `POST /api/models` - Register model (fetches HuggingFace info)
-- `PATCH /api/models/{id}` - Update approval status
+### Matters
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/matters` | List all matters |
+| POST | `/api/matters/{id}/process` | Process all documents |
+| POST | `/api/matters/{id}/upload` | Upload documents |
 
 ### Metrics
-- `GET /api/metrics/summary` - Dashboard stats
-- `GET /api/metrics/processing` - Processing trends
-- `GET /api/metrics/models` - Model usage
-- `GET /api/metrics/costs` - API costs
-
-## Features
-
-### Document Processing
-- Upload PDFs via drag-and-drop
-- Select semantic model (LegalBERT, all-MiniLM, etc.)
-- Optional Florence-2 vision analysis
-- Background processing with status updates
-
-### Visual Page Reviewer
-- Page-by-page navigation
-- Visual content highlighting (charts, tables)
-- Side-by-side results view
-- Zoom and pan controls
-
-### Model Registry
-- Automatic HuggingFace metadata fetching
-- Approval workflow
-- Usage statistics
-- Size and license info
-
-### Metrics Dashboard
-- Processing trends over time
-- Tag detection rates
-- Model performance comparison
-- API cost tracking
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/metrics/summary` | Dashboard statistics |
+| GET | `/api/training/summary` | Tag usage stats |
 
 ## Configuration
 
 ### Environment Variables
 
-- `DATABASE_URL` - Database connection (default: SQLite)
-- `DATA_DIR` - Data directory (default: ./data)
-- `OLLAMA_BASE_URL` - Ollama server URL (default: http://localhost:11434)
-- `OLLAMA_MODEL` - Ollama model for Smart Mode (default: qwen2.5:7b)
-- `GOOGLE_API_KEY` - Google API key for Gemini (optional, fallback if no Ollama)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OLLAMA_BASE_URL` | http://localhost:11434 | Ollama server |
+| `OLLAMA_MODEL` | qwen2.5:7b | LLM model for Stage 2 |
 
-### Ollama Setup (Recommended for Local LLM)
+## Future Roadmap
 
-```bash
-# Install Ollama
-brew install ollama
+### Planned
+- [ ] GPU cloud deployment (A100/H100)
+- [ ] Individual document reprocess
+- [ ] Model comparison A/B testing
 
-# Start Ollama service
-brew services start ollama
+### Integrations
+- [ ] MatterMgmt DB - Pull matter metadata
+- [ ] DMS API Framework - Auto-pull documents
 
-# Pull Qwen 2.5 7B model (~4.7GB)
-ollama pull qwen2.5:7b
+## Version History
 
-# Verify
-ollama list
-```
-
-The system auto-detects Ollama and prefers it over cloud APIs for privacy and cost.
+| Version | Date | Changes |
+|---------|------|---------|
+| 0.3.0 | 2024-12-27 | Two-stage pipeline, LLM refinement, word boundaries |
+| 0.2.0 | 2024-12-26 | E5 model, tag highlights, fast pipeline |
+| 0.1.0 | 2024-12-25 | Initial release |
 
 ## License
 
