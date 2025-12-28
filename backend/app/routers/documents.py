@@ -44,6 +44,7 @@ class DocumentResponse(BaseModel):
     matter_id: Optional[str] = None
     matter: Optional[MatterBrief] = None
     average_confidence: Optional[float] = None
+    llm_used: Optional[bool] = None  # True if Stage 2 LLM was used
 
     class Config:
         from_attributes = True
@@ -137,6 +138,12 @@ async def list_documents(
             Result.document_id == doc.id
         ).order_by(Result.processed_at.desc()).first()
 
+        # Extract llm_used from result_json
+        llm_used = None
+        if latest_result and latest_result.result_json:
+            result_data = latest_result.result_json if isinstance(latest_result.result_json, dict) else {}
+            llm_used = result_data.get('llm_used', False)
+
         doc_dict = {
             "id": doc.id,
             "filename": doc.filename,
@@ -148,7 +155,8 @@ async def list_documents(
             "error_message": doc.error_message,
             "matter_id": doc.matter_id,
             "matter": None,
-            "average_confidence": latest_result.average_confidence if latest_result else None
+            "average_confidence": latest_result.average_confidence if latest_result else None,
+            "llm_used": llm_used
         }
         if doc.matter_id:
             matter = db.query(Matter).filter(Matter.id == doc.matter_id).first()

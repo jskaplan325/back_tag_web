@@ -39,6 +39,7 @@ interface Document {
   matter_id: string | null
   matter: MatterBrief | null
   average_confidence: number | null
+  llm_used: boolean | null
 }
 
 type SortField = 'filename' | 'confidence' | 'uploaded_at'
@@ -369,6 +370,7 @@ export default function Documents() {
                 </th>
                 <th className="px-6 py-3 text-left text-sm font-medium text-gray-500">Matter</th>
                 <th className="px-6 py-3 text-left text-sm font-medium text-gray-500">Status</th>
+                <th className="px-6 py-3 text-left text-sm font-medium text-gray-500">AI</th>
                 <th
                   className="px-6 py-3 text-left text-sm font-medium text-gray-500 cursor-pointer hover:bg-gray-100"
                   onClick={() => toggleSort('confidence')}
@@ -427,6 +429,18 @@ export default function Documents() {
                       {doc.status === 'ignored' && <EyeOff className="h-3 w-3" />}
                       {doc.status}
                     </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    {doc.status === 'completed' ? (
+                      <span className={clsx(
+                        'text-xs font-medium px-2 py-0.5 rounded',
+                        doc.llm_used ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
+                      )}>
+                        {doc.llm_used ? 'E5+LLM' : 'E5'}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400">-</span>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     {doc.average_confidence != null ? (
