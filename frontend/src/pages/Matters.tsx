@@ -250,33 +250,37 @@ function ProcessingStatusPanel({
       {/* Expanded details */}
       {isExpanded && stats && (
         <div className="px-4 pb-3 border-t border-gray-200">
-          {/* LLM Backend Info */}
+          {/* Model Pipeline Info */}
           {llmStatus && (
-            <div className="mt-3 mb-3 p-2 bg-gray-50 rounded-lg text-xs">
+            <div className="mt-3 mb-3 p-2 bg-gray-50 rounded-lg text-xs space-y-1">
+              {/* Stage 1: Embedding Model */}
               <div className="flex items-center justify-between">
-                <span className="text-gray-500">Smart Mode:</span>
-                {llmStatus.smart_mode_available ? (
+                <span className="text-gray-500">Stage 1 (Embedding):</span>
+                <span className="flex items-center gap-1 text-green-600">
+                  <CheckCircle className="h-3 w-3" />
+                  <span>E5-large-v2</span>
+                </span>
+              </div>
+              {/* Stage 2: LLM Refinement */}
+              <div className="flex items-center justify-between">
+                <span className="text-gray-500">Stage 2 (LLM):</span>
+                {llmStatus.ollama?.available ? (
                   <span className="flex items-center gap-1 text-green-600">
                     <CheckCircle className="h-3 w-3" />
-                    {llmStatus.ollama.available ? (
-                      <span>Local ({llmStatus.ollama.model})</span>
-                    ) : (
-                      <span>Cloud (Gemini)</span>
-                    )}
+                    <span>{llmStatus.ollama.model || 'qwen2.5:7b'}</span>
                   </span>
                 ) : (
                   <span className="flex items-center gap-1 text-gray-400">
                     <XCircle className="h-3 w-3" />
-                    Not configured
+                    <span>Not available</span>
                   </span>
                 )}
               </div>
-              {llmStatus.ollama.available && (
-                <div className="flex items-center justify-between mt-1">
-                  <span className="text-gray-500">Ollama:</span>
-                  <span className="text-gray-600">{llmStatus.ollama.models_installed.join(', ')}</span>
-                </div>
-              )}
+              {/* Trigger info */}
+              <div className="flex items-center justify-between text-gray-400 pt-1 border-t border-gray-200">
+                <span>LLM triggers:</span>
+                <span>70-75% confidence</span>
+              </div>
             </div>
           )}
 
